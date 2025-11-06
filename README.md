@@ -1,4 +1,4 @@
-
+# An Adaptive Framework for Multimodal Emotion Understanding in Human–Robot Interaction
 We propose a multimodal emotion understanding framework based on an adaptive cross-modal fusion mechanism integrated with an emotion-level Transformer decoder.
 The framework is designed to achieve both robust multimodal representation learning and fine-grained emotion interpretability for Human–Robot Interaction (HRI) tasks.
 
