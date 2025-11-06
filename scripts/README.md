@@ -37,10 +37,11 @@ Mean/CLS Pooling
 h_text ∈ ℝ^(d_t)
 ```
 #### Equation
-\[
+
+$$
 h_\text{text} = \text{Pool}\big(\text{BERT}(\text{Tokenizer}(x_\text{text}))\big)
 \quad\in\mathbb{R}^{d_t}
-\]
+$$
 
 #### Characteristics
 - Encodes contextual meaning of the utterance.
@@ -94,10 +95,11 @@ Mask-weighted Mean Pooling (Time-wise)
 h_audio ∈ ℝ^(d_a)
 ```
 #### Equation
-\[
+
+$$
 h_\text{audio} = \text{MeanPool}\big(\text{WavLM}(\text{FeatureExtractor}(x_\text{audio}))\big)
 \quad\in\mathbb{R}^{d_a}
-\]
+$$
 
 #### Characteristics
 - Captures acoustic, prosodic, and speaker-related features.
@@ -150,16 +152,17 @@ Both ℎ_text and ℎ_audio are fixed-length representations, suitable for fusio
 ```
 
 #### Next Step: Fusion Equation
-\[
-h_\text{fusion} = f_\text{fusion}(h_\text{text}, h_\text{audio})
-\]
 
-\[
+$$
+h_\text{fusion} = f_\text{fusion}(h_\text{text}, h_\text{audio})
+$$
+
+$$
 h_\text{fusion} = f_\text{fusion}\Big(
     \text{Pool}\big(\text{BERT}(\text{Tokenizer}(x_\text{text}))\big),
     \text{MeanPool}\big(\text{WavLM}(\text{FeatureExtractor}(x_\text{audio}))\big)
 \Big)
-\]
+$$
 
 ## Summary
 We adopt a feature-based transfer learning paradigm where modality-specific pretrained encoders (BERT for text and WavLM for audio) are used to extract semantically and acoustically rich embeddings ℎ_text and ℎ_audio, which serve as inputs to the multimodal fusion and emotion decoding stages.
