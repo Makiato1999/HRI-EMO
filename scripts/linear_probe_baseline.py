@@ -5,12 +5,10 @@ import numpy as np
 import torch, torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-# ---------- Paths ----------
 A_DIR = Path("../features/audio")
 T_DIR = Path("../features/text")
 INDEX_PATH = Path("../data/iemocap_index_splits.csv")  # your CSV with split column
 
-# ---------- Helpers ----------
 def mean_pool(x: torch.Tensor) -> torch.Tensor:
     """Average along time dimension if needed."""
     x = x.float()
@@ -39,19 +37,17 @@ def load_vec(pt_path: Path) -> torch.Tensor:
         raise TypeError(f"Unsupported object type in {pt_path}: {type(obj)}")
     return mean_pool(x)
 
-# ---------- Read CSV ----------
 df = pd.read_csv(INDEX_PATH)
 
-# Columns (as you provided)
 id_col    = "utter_id"
-label_col = "label"   # may be strings like 'neutral'
+label_col = "label"   
 split_col = "split"
 
 # Normalize ID (remove extensions/paths)
 from os.path import basename, splitext
 df["_id_"] = df[id_col].astype(str).map(lambda v: splitext(basename(v.strip()))[0])
 
-# ---- Encode labels (supports string categories) ----
+# ncode labels (supports string categories) 
 labels_raw = df[label_col].astype(str).str.strip()
 # Try int; if fails, fall back to category codes
 try:
@@ -77,7 +73,7 @@ df["_split_"] = df[split_col].astype(str).str.lower().map(
     else ("test" if "test" in s else s))
 )
 
-# ---------- Keep rows with both features ----------
+
 a_ids = {p.stem for p in A_DIR.glob("*.pt")}
 t_ids = {p.stem for p in T_DIR.glob("*.pt")}
 both  = a_ids & t_ids
@@ -86,7 +82,7 @@ if missing:
     print(f"⚠️  Skipping {len(missing)} rows without both features. Example: {list(missing)[:5]}")
 df = df[df["_id_"].isin(both)].reset_index(drop=True)
 
-# ---------- Dataset ----------
+
 class FeatDS(Dataset):
     def __init__(self, frame: pd.DataFrame, split: str):
         self.df = frame[frame["_split_"] == split].reset_index(drop=True)
@@ -112,7 +108,7 @@ train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
 val_loader   = DataLoader(val_ds, batch_size=64, shuffle=False)
 test_loader  = DataLoader(test_ds, batch_size=64, shuffle=False) if test_ds else None
 
-# ---------- Model (Linear Probe) ----------
+# Model (Linear Probe)
 in_dim  = train_ds[0][0].numel()
 num_cls = int(df["_label_"].max()) + 1
 model   = nn.Linear(in_dim, num_cls)
@@ -139,7 +135,7 @@ def eval_loader(loader):
         f1 = float("nan")
     return acc, f1
 
-# ---------- Training ----------
+# Training
 best = 0.0
 for epoch in range(10):
     model.train()
@@ -152,7 +148,7 @@ for epoch in range(10):
     best = max(best, val_acc)
     print(f"Epoch {epoch:02d} | Val Acc={val_acc:.3f} | Val F1={val_f1:.3f} | Best Acc={best:.3f}")
 
-# ---------- Final Test ----------
+
 if test_loader:
     test_acc, test_f1 = eval_loader(test_loader)
     print(f"[TEST] Acc={test_acc:.3f} | Macro-F1={test_f1:.3f}")

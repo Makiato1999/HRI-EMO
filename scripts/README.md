@@ -151,19 +151,6 @@ Both ℎ_text and ℎ_audio are fixed-length representations, suitable for fusio
                             Emotion Prediction
 ```
 
-#### Next Step: Fusion Equation
-
-$$
-h_\text{fusion} = f_\text{fusion}(h_\text{text}, h_\text{audio})
-$$
-
-$$
-h_\text{fusion} = f_\text{fusion}\Big(
-    \text{Pool}\big(\text{BERT}(\text{Tokenizer}(x_\text{text}))\big),
-    \text{MeanPool}\big(\text{WavLM}(\text{FeatureExtractor}(x_\text{audio}))\big)
-\Big)
-$$
-
 ## Testing
 #### Stage 1: Feature Validation
 - Audio & text features verified (3,694 samples each), consistent shape (768,).
