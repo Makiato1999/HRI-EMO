@@ -164,5 +164,20 @@ h_\text{fusion} = f_\text{fusion}\Big(
 \Big)
 $$
 
+## Testing
+#### Stage 1: Feature Validation
+- Audio & text features verified (3,694 samples each), consistent shape (768,).
+- No NaN/Inf detected, aligned with iemocap_index_splits.csv.
+   → Features validated and ready for fusion.
+
+#### Stage 2: Linear Probe Results
+| Model               | Input            | Acc      | F1       | Key Insight                         |
+| ------------------- | ---------------- | -------- | -------- | ----------------------------------- |
+| Audio-only          | Audio (768D)     | ~0.40    | ~0.33    | Captures tonal cues only            |
+| Text-only           | Text (768D)      | ~0.47    | ~0.39    | Stronger semantic signal            |
+| Audio+Text (Concat) | `[a; t]` (1536D) | **0.53** | **0.42** | Confirms multimodal complementarity |
+
+→ Even a linear probe shows robust emotional information in embeddings.
+
 ## Summary
 We adopt a feature-based transfer learning paradigm where modality-specific pretrained encoders (BERT for text and WavLM for audio) are used to extract semantically and acoustically rich embeddings ℎ_text and ℎ_audio, which serve as inputs to the multimodal fusion and emotion decoding stages.
