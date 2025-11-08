@@ -18,7 +18,7 @@ def parse_args():
     ap.add_argument("--model_name", default="bert-base-uncased")
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--max_len", type=int, default=128)
-    ap.add_argument("--out_dir", default="features/text")
+    ap.add_argument("--out_dir", default="features/utter_level/text")
     return ap.parse_args()
 
 class TextDS(Dataset):

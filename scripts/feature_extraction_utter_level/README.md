@@ -50,16 +50,16 @@ $$
 
 #### How to run
 ```
-python scripts/extract_text_feats_bert.py \
+python scripts/feature_extraction_utter_level/extract_text_feats_bert.py \
   --csv data/iemocap_index_splits.csv \
   --model_name bert-base-uncased \
   --batch_size 64 \
   --max_len 128 \
-  --out_dir features/text
+  --out_dir features/utter_level/text
 ```
 
 ```
-python scripts/train_text_baseline.py \
+python scripts/feature_extraction_utter_level/train_text_baseline.py \
   --csv data/iemocap_index_splits.csv \
   --feat_dir features/text \
   --mlp_hidden 256 \
@@ -108,13 +108,13 @@ $$
 
 #### How to run
 ```
-python scripts/extract_audio_feats_wavlm.py \
+python scripts/feature_extraction_utter_level/extract_audio_feats_wavlm.py \
   --csv data/iemocap_index_splits.csv \
   --model_name microsoft/wavlm-base-plus \
   --target_sr 16000 \
   --max_seconds 10 \
   --batch_size 16 \
-  --out_dir features/audio
+  --out_dir features/utter_level/audio
 ```
 ## Output Summary
 | Modality  | Encoder | Feature Extractor | Output Shape   | Training Strategy      |

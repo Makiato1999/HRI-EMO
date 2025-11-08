@@ -25,7 +25,7 @@ def parse_args():
     ap.add_argument("--max_seconds", type=float, default=10.0,
                     help="truncate/pad to this length for batching")
     ap.add_argument("--batch_size", type=int, default=16)
-    ap.add_argument("--out_dir", default="features/audio")
+    ap.add_argument("--out_dir", default="features/utter_level/audio")
     return ap.parse_args()
 
 class AudioDS(Dataset):

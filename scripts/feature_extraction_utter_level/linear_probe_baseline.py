@@ -5,8 +5,8 @@ import numpy as np
 import torch, torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-A_DIR = Path("../features/audio")
-T_DIR = Path("../features/text")
+A_DIR = Path("../features/utter_level/audio")
+T_DIR = Path("../features/utter_level/text")
 INDEX_PATH = Path("../data/iemocap_index_splits.csv")  # your CSV with split column
 
 def mean_pool(x: torch.Tensor) -> torch.Tensor:
