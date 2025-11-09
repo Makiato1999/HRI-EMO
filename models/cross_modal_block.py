@@ -78,10 +78,11 @@ class CrossModalTransformer(nn.Module):
 
     def __init__(self, num_layers=2, d_model=768, n_heads=8, dropout=0.1):
         super().__init__()
-        self.layers = nn.ModuleList([
-            CrossModalBlock(d_model, n_heads, dropout)
-            for _ in range(num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                CrossModalBlock(d_model, n_heads, dropout) for _ in range(num_layers)
+            ]
+        )
 
     def forward(
         self,
@@ -92,23 +93,3 @@ class CrossModalTransformer(nn.Module):
         for layer in self.layers:
             h_a, h_t = layer(h_a, h_t, mask_a, mask_t)
         return h_a, h_t
-
-"""
-from models.cross_modal_block import CrossModalTransformer
-import torch
-
-# utter-level example
-h_a = torch.randn(32, 1, 768)
-h_t = torch.randn(32, 1, 768)
-model = CrossModalTransformer(num_layers=2)
-h_a_tilde, h_t_tilde = model(h_a, h_t)
-print(h_a_tilde.shape)  # [32,1,768]
-
-# sequence-level example (未来直接替换)
-h_a = torch.randn(8, 400, 768)
-h_t = torch.randn(8, 128, 768)
-mask_a = torch.zeros(8, 400, dtype=torch.bool)
-mask_t = torch.zeros(8, 128, dtype=torch.bool)
-h_a_tilde, h_t_tilde = model(h_a, h_t, mask_a, mask_t)
-print(h_a_tilde.shape, h_t_tilde.shape)
-"""
