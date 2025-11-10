@@ -11,9 +11,7 @@ The fusion network operates purely on these features.
 
 ---
 
-## Components
-
-#### `cross_modal_block_tacfn.py` — CrossModalTransformer
+## 1. cross_modal_block_tacfn.py — CrossModalTransformer
 
 **Goal:** Reduce intra-modal redundancy and align audio–text representations.
 
@@ -45,7 +43,7 @@ This module is fully compatible with:
 
 ---
 
-#### `beta_gate_tacfn.py` — Vector-wise BetaGate
+## 2. beta_gate_tacfn.py — Vector-wise BetaGate
 
 **Goal:** Learn an adaptive, fine-grained fusion of the two modalities.
 
@@ -99,7 +97,7 @@ This design:
 
 ---
 
-#### `fusion_classifier.py` — End-to-End Fusion Model
+## 3. fusion_classifier.py — End-to-End Fusion Model
 
 Wraps everything into a classification-ready module.
 
