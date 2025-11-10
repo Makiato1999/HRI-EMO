@@ -37,13 +37,13 @@ feed-forward block to ensure stability.
 
 2. **Vector-wise β-Gating — fine-grained adaptive fusion**
 
-Instead of a single scalar gate, the model predicts a *per-dimension* weight vector $ \mathbf{β}\in[0,1]^d $ that controls the contribution of each feature dimension from audio and text:
+Instead of a single scalar gate, the model predicts a *per-dimension* weight vector $\mathbf{β}\in[0,1]^d$ that controls the contribution of each feature dimension from audio and text:
 
 $$
 h_{\text{fusion}} = \mathbf{β}\odot\tilde{h}_a + (1-\mathbf{β})\odot\tilde{h}_t
 $$
 
-where $ \odot $ denotes element-wise multiplication.  
+where $\odot$ denotes element-wise multiplication.  
 Each component $β_j$ adaptively balances the $j$-th semantic dimension, allowing some latent features to rely more on acoustic cues while others emphasize linguistic information. A mean-pooled β-value is logged for interpretability.
 
 This design—TACFN-style intra + cross attention + vector gating—enhances:
