@@ -18,26 +18,37 @@ $$
 These embeddings capture semantic, syntactic, and acoustic-prosodic information, respectively.
 
 ## 2. Adaptive Cross-Modal Fusion
-To achieve semantic alignment and dynamic weighting across modalities,
-we employ a bidirectional cross-modal Transformer and a β-gating module.
 
-1. Cross-Modal Transformer performs semantic alignment:
- 
-$$
-h_{a \rightarrow t} = \text{Cross}(\text{audio}, \text{text})
-$$
+To achieve semantic alignment and dynamic weighting across modalities,  
+we adopt a Transformer-based cross-modal encoder combined with a  vector-wise adaptive gating mechanism.
 
-ensuring that both modalities attend to semantically relevant regions of each other.
-   
-2. β-Gating Mechanism dynamically adjusts the contribution of each modality based on context reliability:
+1. **Cross-Modal Transformer — semantic alignment & redundancy reduction**
+
+Each modality first passes through an *intra-modal self-attention* layer  
+to filter redundant information, followed by *bidirectional cross-attention*  
+to exchange context:
 
 $$
-h_{\text{fusion}} = \beta \cdot \tilde{h}_{a} + (1 - \beta) \cdot \tilde{h}_{t}
+\tilde{h}_a, \tilde{h}_t = \text{CrossModalTransformer}(h_a, h_t)
 $$
 
-where 𝛽 ∈ [0,1] is an adaptive gate learned during training.
+Residual connections and LayerNorm are applied after every attention and  
+feed-forward block to ensure stability.
 
-This design enhances robustness by down-weighting noisy modalities and promotes interpretability by exposing modality-level importance.
+2. **Vector-wise β-Gating — fine-grained adaptive fusion**
+
+Instead of a single scalar gate, the model predicts a *per-dimension* weight vector \( \mathbf{β}\in[0,1]^d \) that controls the contribution of each feature dimension from audio and text:
+
+$$
+h_{\text{fusion}} = \mathbf{β}\odot\tilde{h}_a + (1-\mathbf{β})\odot\tilde{h}_t
+$$
+
+where \( \odot \) denotes element-wise multiplication.  
+Each component \(β_j\) adaptively balances the \(j\)-th semantic dimension, allowing some latent features to rely more on acoustic cues while others emphasize linguistic information. A mean-pooled β-value is logged for interpretability.
+
+This design—TACFN-style intra + cross attention + vector gating—enhances:
+- **Robustness**, by dynamically down-weighting noisy modalities per feature.
+- **Explainability**, by revealing modality preference across feature dimensions.
 
 ## 3. Emotion-Level Transformer Decoder
 Subsequently, an emotion-level Transformer decoder is introduced.
