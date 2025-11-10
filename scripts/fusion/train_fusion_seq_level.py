@@ -294,7 +294,7 @@ def get_dataloaders(args):
 # Training / Evaluation
 # -------------------------------------------------------------------------
 
-def train_one_epoch(model, loader, optimizer, criterion, device):
+def train_one_epoch(model, loader, optimizer, criterion, device, epoch):
     model.train()
     total_loss, correct, total = 0.0, 0, 0
 
@@ -302,6 +302,16 @@ def train_one_epoch(model, loader, optimizer, criterion, device):
         h_a, m_a = h_a.to(device), m_a.to(device)
         h_t, m_t = h_t.to(device), m_t.to(device)
         labels = labels.to(device)
+
+        # --- DEBUG: check feature norms (only first few batches) ---
+        if epoch == 1 and np.random.rand() < 0.1:  # print about 10% batches in first epoch
+            with torch.no_grad():
+                from models.beta_gate import masked_mean
+                pa = masked_mean(h_a, m_a)  # [B, d]
+                pt = masked_mean(h_t, m_t)
+                print("\n[DEBUG] audio mean norm:", pa.norm(dim=-1).mean().item())
+                print("[DEBUG] text  mean norm:", pt.norm(dim=-1).mean().item())
+
 
         optimizer.zero_grad()
 
@@ -395,7 +405,7 @@ def main():
         print(f"\n=== Epoch {epoch}/{args.epochs} ===")
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device
+            model, train_loader, optimizer, criterion, device, epoch
         )
         val_loss, val_acc, mean_beta = evaluate(
             model, val_loader, criterion, device

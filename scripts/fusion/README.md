@@ -22,5 +22,5 @@ python -m scripts.fusion.train_fusion_seq_level \
   --batch_size 8 \
   --lr 1e-4 \
   --dropout 0.2 \
-  --out_dir runs/fusion_seq_level_default
+  --out_dir runs/fusion_seq_level_tacfn_like
 ```
