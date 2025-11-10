@@ -17,7 +17,7 @@ def parse_args():
     ap.add_argument("--batch_size", type=int, default=256)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--mlp_hidden", type=int, default=0, help="0 = linear head; >0 = 1-layer MLP")
-    ap.add_argument("--out_dir", default="runs/train_text_baseline")
+    ap.add_argument("--out_dir", default="runs/train_textonly_baseline")
     return ap.parse_args()
 
 class FeatDS(Dataset):

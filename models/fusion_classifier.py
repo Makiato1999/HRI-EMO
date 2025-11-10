@@ -11,9 +11,9 @@ class FusionClassifier(nn.Module):
     Cross-Modal Transformer + Beta-Gating + Classification Head
 
     This model integrates three key modules:
-        1. CrossModalTransformer  – performs bidirectional semantic alignment
-        2. BetaGate               – learns adaptive modality weighting β
-        3. Classifier Head        – maps the fused representation to emotion classes
+        1. CrossModalTransformer  performs bidirectional semantic alignment
+        2. BetaGate               learns adaptive modality weighting β
+        3. Classifier Head        maps the fused representation to emotion classes
 
     It supports both:
         - Utterance-level features: [B, d]
@@ -95,15 +95,15 @@ class FusionClassifier(nn.Module):
     ):
         """
         Args:
-            h_a: [B, d] or [B, L_a, d] – audio embeddings
-            h_t: [B, d] or [B, L_t, d] – text embeddings
+            h_a: [B, d] or [B, L_a, d] audio embeddings
+            h_t: [B, d] or [B, L_t, d] text embeddings
             mask_a: Optional [B, L_a] boolean padding mask
             mask_t: Optional [B, L_t] boolean padding mask
 
         Returns:
-            logits:          [B, num_classes] – classification outputs
-            beta:            [B, 1]           – learned modality gate
-            h_fusion_pooled: [B, d]           – pooled fused representation
+            logits:          [B, num_classes] classification outputs
+            beta:            [B, 1]           learned modality gate
+            h_fusion_pooled: [B, d]           pooled fused representation
         """
         # 1) Standardize inputs to [B, L, d]
         h_a = self._ensure_3d(h_a)

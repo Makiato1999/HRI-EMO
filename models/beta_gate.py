@@ -73,7 +73,7 @@ class BetaGate(nn.Module):
 
         Returns:
             h_fusion: [B, L_out, d]  (same shape as broadcasted inputs)
-            beta:     [B, 1]        (scalar gate per sample, before broadcast)
+            beta:     [B, 1]         (scalar gate per sample, before broadcast)
         """
         B, _, d = h_a.shape
 
