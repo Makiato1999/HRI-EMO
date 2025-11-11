@@ -50,7 +50,7 @@ $$
 
 #### How to run
 ```
-python scripts/feature_extraction_utter_level/extract_text_feats_bert.py \
+python scripts/iemocap_feature_extraction_utter_level/extract_text_feats_bert.py \
   --csv data/iemocap_index_splits.csv \
   --model_name bert-base-uncased \
   --batch_size 64 \
@@ -59,7 +59,7 @@ python scripts/feature_extraction_utter_level/extract_text_feats_bert.py \
 ```
 
 ```
-python scripts/feature_extraction_utter_level/train_text_baseline.py \
+python scripts/iemocap_feature_extraction_utter_level/train_text_baseline.py \
   --csv data/iemocap_index_splits.csv \
   --feat_dir features/text \
   --mlp_hidden 256 \
@@ -108,7 +108,7 @@ $$
 
 #### How to run
 ```
-python scripts/feature_extraction_utter_level/extract_audio_feats_wavlm.py \
+python scripts/iemocap_feature_extraction_utter_level/extract_audio_feats_wavlm.py \
   --csv data/iemocap_index_splits.csv \
   --model_name microsoft/wavlm-base-plus \
   --target_sr 16000 \

@@ -63,7 +63,7 @@ $$
 #### How to run
 
 ```bash
-python scripts/feature_extraction_seq_level/extract_text_feats_bert_seq.py \
+python scripts/iemocap_feature_extraction_seq_level/extract_text_feats_bert_seq.py \
   --csv data/iemocap_index_splits.csv \
   --model_name bert-base-uncased \
   --max_len 128 \
@@ -114,7 +114,7 @@ $$
 
 #### How to run
 ```bash
-python scripts/feature_extraction_seq_level/extract_audio_feats_wavlm_seq.py \
+python scripts/iemocap_feature_extraction_seq_level/extract_audio_feats_wavlm_seq.py \
   --csv data/iemocap_index_splits.csv \
   --audio_root data/wavs \
   --model_name microsoft/wavlm-base-plus \
