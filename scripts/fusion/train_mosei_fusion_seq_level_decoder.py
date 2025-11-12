@@ -123,6 +123,38 @@ def multilabel_metrics_from_logits(logits, targets, threshold=0.5):
     macro_auc = float(np.mean(aucs)) if aucs else 0.0
     return micro_f1, macro_f1, macro_auc
 
+# === ADD: utils for class imbalance & threshold calibration ===
+def compute_pos_weight(train_df: pd.DataFrame, emo_cols: List[str]) -> torch.Tensor:
+    """
+    pos_weight[c] = (#neg_c / #pos_c)  computed on TRAIN split.
+    按主流做法：把 emo<0 当 0（噪声）；>0 视为正类。
+    """
+    y = train_df[emo_cols].astype(float).clip(lower=0.0)
+    pos = (y > 0.0).sum(axis=0).values
+    neg = (len(y) - pos)
+    pos = np.clip(pos, 1, None)  # avoid div-by-zero
+    pw = (neg / pos).astype(np.float32)
+    return torch.tensor(pw, dtype=torch.float32)
+
+def calibrate_thresholds(probs: np.ndarray, y_true_cont: np.ndarray, steps: int = 19) -> np.ndarray:
+    """
+    为每个情绪单独扫描阈值（0.05~0.95），选 macro-F1 最优的阈值。
+    probs: [N,C] after sigmoid
+    y_true_cont: [N,C] 原始标注（>0 视为正类）
+    """
+    y_true = (y_true_cont > 0.0).astype(int)
+    C = probs.shape[1]
+    ths = np.full(C, 0.5, dtype=np.float32)
+    for c in range(C):
+        best_f1, best_t = -1.0, 0.5
+        for t in np.linspace(0.05, 0.95, steps):
+            pred = (probs[:, c] >= t).astype(int)
+            f1 = f1_score(y_true[:, c], pred, zero_division=0)
+            if f1 > best_f1:
+                best_f1, best_t = f1, t
+        ths[c] = best_t
+    return ths
+# === END ADD ===
 
 # ========================
 # Dataset
@@ -427,6 +459,17 @@ def evaluate(model, loader, criterion, device, args):
         all_logits = torch.cat(all_logits, 0)
         all_targets = torch.cat(all_targets, 0)
         micro_f1, macro_f1, macro_auc = multilabel_metrics_from_logits(all_logits, all_targets)
+
+        # === ADD: calibrated thresholds based macro-F1 (diagnostic) ===
+        probs = torch.sigmoid(all_logits).numpy()
+        y_true_cont = all_targets.numpy()
+        cal_ths = calibrate_thresholds(probs, y_true_cont, steps=19)
+        y_true_bin = (y_true_cont > 0.0).astype(int)
+        y_pred_bin_cal = (probs >= cal_ths[None, :]).astype(int)
+        macro_f1_cal = f1_score(y_true_bin, y_pred_bin_cal, average="macro", zero_division=0)
+        print(f"[Val Calibrated] macro-F1={macro_f1_cal:.3f} | thresholds={np.round(cal_ths,2)}")
+        # 你可以把 cal_ths 存进 best checkpoint（如需测试阶段直接复用）
+         # === END ADD ===
     else:
         micro_f1 = macro_f1 = macro_auc = 0.0
 
@@ -502,7 +545,12 @@ def main():
 
     # Optimizer / Loss / Scheduler / AMP
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    criterion = nn.BCEWithLogitsLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+    # === ADD: class-balanced BCE ===
+    pos_weight = compute_pos_weight(train_df, args.emo_cols)  # on TRAIN only
+    print("[pos_weight]", dict(zip(args.emo_cols, np.round(pos_weight.numpy(), 2))))
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
+    # === END ADD ===
 
     scaler = GradScaler('cuda', enabled=(device.type == "cuda"))
 
