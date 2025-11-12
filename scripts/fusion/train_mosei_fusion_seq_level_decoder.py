@@ -93,6 +93,21 @@ def parse_args():
     ap.add_argument("--max_len_audio", type=int, default=300)
     ap.add_argument("--max_len_text", type=int, default=128)
 
+    # Selection & IO
+    ap.add_argument(
+        "--select_by",
+        type=str,
+        default="macro_auc",
+        choices=["macro_auc", "macro_f1", "calibrated_macro_f1"],
+        help="which validation metric decides best checkpoint"
+    )
+    ap.add_argument(
+        "--save_calibrated_ths",
+        action="store_true",
+        help="save per-class calibrated thresholds into the checkpoint"
+    )
+    ap.add_argument("--num_workers", type=int, default=2, help="DataLoader workers")
+
     # Misc
     ap.add_argument("--out_dir", type=str, default="runs/mosei_fusion_decoder")
     ap.add_argument("--seed", type=int, default=1234)
@@ -469,13 +484,15 @@ def evaluate(model, loader, criterion, device, args):
         macro_f1_cal = f1_score(y_true_bin, y_pred_bin_cal, average="macro", zero_division=0)
         print(f"[Val Calibrated] macro-F1={macro_f1_cal:.3f} | thresholds={np.round(cal_ths,2)}")
         # 你可以把 cal_ths 存进 best checkpoint（如需测试阶段直接复用）
-         # === END ADD ===
+        # === END ADD ===
     else:
         micro_f1 = macro_f1 = macro_auc = 0.0
+        cal_ths = None
+        macro_f1_cal = 0.0
 
     print(f"[Val Metrics] Loss={avg_loss:.4f} | micro-F1={micro_f1:.3f} | macro-F1={macro_f1:.3f} | macro-AUC={macro_auc:.3f}")
-    return avg_loss, micro_f1, macro_f1, macro_auc, mean_beta
-
+    # 增加返回：cal_ths（np.ndarray 或 None）、macro_f1_cal（float）
+    return avg_loss, micro_f1, macro_f1, macro_auc, mean_beta, cal_ths, macro_f1_cal
 
 # ========================
 # Main
@@ -516,11 +533,11 @@ def main():
     pin = (device.type == "cuda")
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
-        num_workers=4, pin_memory=pin, collate_fn=collate_fn,
+        num_workers=args.num_workers, pin_memory=pin, collate_fn=collate_fn,
     )
     val_loader = DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
-        num_workers=4, pin_memory=pin, collate_fn=collate_fn,
+        num_workers=args.num_workers, pin_memory=pin, collate_fn=collate_fn,
     )
 
     # Read feature dims from meta.json
@@ -547,7 +564,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     # criterion = nn.BCEWithLogitsLoss()
     # === ADD: class-balanced BCE ===
-    pos_weight = compute_pos_weight(train_df, args.emo_cols)  # on TRAIN only
+    pos_weight = compute_pos_weight(train_ds.df, args.emo_cols)  # on TRAIN only
     print("[pos_weight]", dict(zip(args.emo_cols, np.round(pos_weight.numpy(), 2))))
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
     # === END ADD ===
@@ -566,7 +583,7 @@ def main():
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    best_val_macro_f1 = -1.0
+    best_metric = -1.0
     best_state = None
 
     for epoch in range(1, args.epochs + 1):
@@ -574,34 +591,55 @@ def main():
 
         tr_loss, tr_f1_micro, tr_f1_macro, tr_auc_macro, tr_beta = train_one_epoch(
             model, train_loader, optimizer, scheduler, criterion, device, scaler, args)
-        va_loss, va_f1_micro, va_f1_macro, va_auc_macro, va_beta = evaluate(
+        va_loss, va_f1_micro, va_f1_macro, va_auc_macro, va_beta, va_cal_ths, va_macro_f1_cal = evaluate(
             model, val_loader, criterion, device, args
         )
-
         print(
             f"Train Loss: {tr_loss:.4f} | "
             f"F1 micro/macro: {tr_f1_micro:.3f}/{tr_f1_macro:.3f} | "
             f"AUC macro: {tr_auc_macro:.3f} | Mean β: {tr_beta:.3f}  ||  "
             f"Val Loss: {va_loss:.4f} | "
             f"F1 micro/macro: {va_f1_micro:.3f}/{va_f1_macro:.3f} | "
-            f"AUC macro: {va_auc_macro:.3f} | Mean β: {va_beta:.3f}"
+            f"AUC macro: {va_auc_macro:.3f} | Mean β: {va_beta:.3f} | "
+            f"Calib macro-F1: {va_macro_f1_cal:.3f}"
         )
 
         # Save by macro-F1
-        if va_f1_macro > best_val_macro_f1:
-            best_val_macro_f1 = va_f1_macro
+        # 依据 --select_by 选择 best
+        if args.select_by == "macro_auc":
+            metric_for_selection = va_auc_macro
+        elif args.select_by == "calibrated_macro_f1":
+            metric_for_selection = va_macro_f1_cal
+        else:  # "macro_f1"
+            metric_for_selection = va_f1_macro
+
+        if metric_for_selection > best_metric:
+            best_metric = metric_for_selection
             best_state = {
                 "model_state_dict": model.state_dict(),
-                "val_macro_f1": best_val_macro_f1,
                 "epoch": epoch,
                 "args": vars(args),
-                "emo_cols": args.emo_cols
+                "emo_cols": args.emo_cols,
+                "select_by": args.select_by,
+                "val_metric": float(metric_for_selection),
+                "val_macro_auc": float(va_auc_macro),
+                "val_macro_f1": float(va_f1_macro),
+                "val_macro_f1_calibrated": float(va_macro_f1_cal),
             }
+            if args.save_calibrated_ths and va_cal_ths is not None:
+                best_state["val_calibrated_thresholds"] = va_cal_ths.tolist()
 
     if best_state is not None:
         ckpt_path = Path(args.out_dir) / "best_mosei_fusion_decoder.pt"
         torch.save(best_state, ckpt_path)
-        print(f"\n[Saved] Best model to {ckpt_path} (Val macro-F1 = {best_val_macro_f1:.4f})")
+        print(
+            f"\n[Saved] Best model to {ckpt_path} "
+            f"(select_by={best_state['select_by']}, val_metric={best_state['val_metric']:.4f}, "
+            f"macroAUC={best_state['val_macro_auc']:.3f}, macroF1={best_state['val_macro_f1']:.3f}, "
+            f"calibMacroF1={best_state['val_macro_f1_calibrated']:.3f})"
+        )
+        if "val_calibrated_thresholds" in best_state:
+            print(f"[Saved] Per-class thresholds: {np.round(np.array(best_state['val_calibrated_thresholds']),2)}")
     else:
         print("[Warning] No valid model checkpoint saved.")
 
