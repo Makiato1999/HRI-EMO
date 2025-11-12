@@ -324,7 +324,8 @@ def beta_entropy_loss(beta: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
 
 def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, scaler, args):
     model.train()
-    log_loss_sum, log_steps = 0.0, 0
+    total_loss_sum = 0.0   # Σ (raw_loss * batch_size)
+    total_samples = 0      # Σ batch_size
     beta_list = []
     all_logits, all_targets = [], []
 
@@ -338,12 +339,12 @@ def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, scal
         with autocast('cuda', enabled=(device.type == "cuda")):
             logits, beta, _ = model(h_a, h_t, m_a, m_t)
 
-            # 未缩放：用于日志显示
+            # 未缩放：仅用于日志
             raw_loss = criterion(logits, y)
             if (beta is not None) and (args.beta_entropy > 0):
                 raw_loss = raw_loss + args.beta_entropy * beta_entropy_loss(beta)
 
-            # 缩放：用于反向传播（支持梯度累积）
+            # 缩放：用于反向传播（梯度累积）
             loss = raw_loss / max(1, args.grad_accum)
 
         if torch.isnan(loss) or torch.isinf(loss):
@@ -353,6 +354,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, scal
 
         scaler.scale(loss).backward()
 
+        # 每 grad_accum 步执行一次优化器更新
         if (step + 1) % max(1, args.grad_accum) == 0:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -361,9 +363,10 @@ def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, scal
             optimizer.zero_grad(set_to_none=True)
             scheduler.step()
 
-        # ---- 日志统计：按“批次数”平均，不再乘/除 batch size ----
-        log_loss_sum += float(raw_loss.detach().cpu())
-        log_steps += 1
+        # ---- 日志统计（样本加权）----
+        bs = y.size(0)
+        total_loss_sum += raw_loss.detach().float().cpu().item() * bs
+        total_samples += bs
 
         if beta is not None:
             beta_list.extend(beta.detach().float().cpu().view(-1).tolist())
@@ -371,8 +374,12 @@ def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, scal
         all_logits.append(logits.detach().float().cpu())
         all_targets.append(y.detach().float().cpu())
 
-    avg_loss = log_loss_sum / max(log_steps, 1)
-    avg_loss = max(avg_loss, 0.0) 
+    avg_loss = total_loss_sum / max(1, total_samples)
+    # 防止极小的 fp 导致 avg_loss < 0
+    if avg_loss < 0:
+        print(f"[Warn] avg_loss < 0 due to tiny fp error: {avg_loss:.6e}")
+        avg_loss = float(abs(avg_loss))  # 保底显示为正
+
     mean_beta = float(np.mean(beta_list)) if beta_list else 0.0
 
     if all_logits:
@@ -388,7 +395,8 @@ def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, scal
 @torch.no_grad()
 def evaluate(model, loader, criterion, device, args):
     model.eval()
-    log_loss_sum, log_steps = 0.0, 0
+    total_loss_sum = 0.0   # Σ (raw_loss * batch_size)
+    total_samples = 0      # Σ batch_size
     beta_list = []
     all_logits, all_targets = [], []
 
@@ -407,8 +415,10 @@ def evaluate(model, loader, criterion, device, args):
             print("[Warn] NaN/Inf loss in val batch, skipping.")
             continue
 
-        log_loss_sum += float(raw_loss.detach().cpu())
-        log_steps += 1
+        # ---- 日志统计（样本加权）----
+        bs = y.size(0)
+        total_loss_sum += raw_loss.detach().float().cpu().item() * bs
+        total_samples += bs
 
         if beta is not None:
             beta_list.extend(beta.detach().float().cpu().view(-1).tolist())
@@ -416,8 +426,12 @@ def evaluate(model, loader, criterion, device, args):
         all_logits.append(logits.detach().float().cpu())
         all_targets.append(y.detach().float().cpu())
 
-    avg_loss = log_loss_sum / max(log_steps, 1)
-    avg_loss = max(avg_loss, 0.0)
+    avg_loss = total_loss_sum / max(1, total_samples)
+    # 防止极小的 fp 导致 avg_loss < 0
+    if avg_loss < 0:
+        print(f"[Warn] avg_loss < 0 due to tiny fp error: {avg_loss:.6e}")
+        avg_loss = float(abs(avg_loss))  # 保底显示为正
+
     mean_beta = float(np.mean(beta_list)) if beta_list else 0.0
 
     if all_logits:
@@ -429,6 +443,7 @@ def evaluate(model, loader, criterion, device, args):
 
     print(f"[Val Metrics] Loss={avg_loss:.4f} | micro-F1={micro_f1:.3f} | macro-F1={macro_f1:.3f} | macro-AUC={macro_auc:.3f}")
     return avg_loss, micro_f1, macro_f1, macro_auc, mean_beta
+
 
 # ========================
 # Main
