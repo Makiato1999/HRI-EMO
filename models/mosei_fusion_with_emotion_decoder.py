@@ -27,13 +27,13 @@ class MoseiFusionWithEmotionDecoder(nn.Module):
         self,
         d_audio: int,
         d_text: int,
-        d_model: int = 256,
+        d_model: int = 384,
         num_emotions: int = 6,
-        n_heads: int = 4,
-        num_layers_fusion: int = 2,
-        num_layers_decoder: int = 2,
+        n_heads: int = 6,
+        num_layers_fusion: int = 3,
+        num_layers_decoder: int = 3,
         beta_hidden: int = 128,
-        dropout: float = 0.1,
+        dropout: float = 0.2,
     ):
         super().__init__()
 
