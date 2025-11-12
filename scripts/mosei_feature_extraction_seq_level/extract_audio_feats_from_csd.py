@@ -127,6 +127,12 @@ def main():
             continue
 
         seg_feats = au_feats[mask]  # [L, D]
+        # 没有对 seg_feats 做任何 NaN / Inf 清洗。而 MOSEI 的 COVAREP 里是已知会出现 NaN 的（某些声学特征提取不到）。
+        # 所以如果哪怕一个 frame 的某个维度是 NaN，它就被完整写进 [uid].pt，后面：进模型 → 注意力 / 线性层 → 全是 NaN
+        # 最后 BCEWithLogitsLoss 收到 NaN → loss 变 NaN
+        # NEW: 清洗 NaN / Inf
+        seg_feats = np.nan_to_num(seg_feats, nan=0.0, posinf=0.0, neginf=0.0)
+        
         if seg_feats.ndim == 1:
             seg_feats = seg_feats[None, :]
 

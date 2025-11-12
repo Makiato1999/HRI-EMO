@@ -6,7 +6,7 @@ import json
 import torch
 import pandas as pd
 from mmsdk import mmdatasdk
-
+import numpy as np
 
 def parse_args():
     ap = argparse.ArgumentParser()
@@ -134,6 +134,8 @@ def main():
 
         if hasattr(feats, "ndim") and feats.ndim == 1:
             feats = feats[None, :]
+
+        feats = np.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
 
         h = torch.from_numpy(feats).float()
         if h.ndim != 2:
