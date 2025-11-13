@@ -3,7 +3,7 @@
 
 import argparse
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any   # [MOD] 加 Dict, Any
 import json
 import numpy as np
 import pandas as pd
@@ -146,14 +146,63 @@ def collate_seq_batch(batch):
     y = torch.stack(Ys, dim=0)
     return h_a, m_a, h_t, m_t, y
 
+# ============== [MOD] hooks: 捕获 Emotion Decoder cross-attn ==============
+def register_emodecoder_attn_hooks(model: torch.nn.Module, store: Dict[str, Any], max_layers: int = 2):
+    """
+    在 Emotion Decoder 的 cross-attn 上注册 forward hooks，记录注意力矩阵。
+
+    匹配规则（通用版）：
+      - 模块名里同时包含 "emotion" 和 "decoder"
+      - 且包含 "cross_attn" 或 "crossattn"
+      - 若名字中包含 "layers.N."，则只保留前 max_layers 层
+    """
+    for name, module in model.named_modules():
+        lname = name.lower()
+        if "emotion" in lname and "decoder" in lname and ("cross_attn" in lname or "crossattn" in lname):
+            # 限层数（如果你的 EmotionDecoder 用 layers.N 命名）
+            if "layers" in lname:
+                try:
+                    layer_idx = int(lname.split("layers.")[1].split(".")[0])
+                    if layer_idx >= max_layers:
+                        continue
+                except Exception:
+                    pass
+
+            def _hook(m, inp, out, _n=name):
+                # torch.nn.MultiheadAttention 返回 (out, attn_weights)
+                if isinstance(out, tuple) and len(out) == 2:
+                    store.setdefault("decoder_attn", {})[_n] = out[1].detach().cpu()
+            module.register_forward_hook(_hook)
+
+    return store
+
 # ---------------- Inference ----------------
 @torch.no_grad()
-def run_split(model, ds, batch_size, device, out_dir, split_name, amp_dtype: Optional[torch.dtype]):
+def run_split(
+    model,
+    ds,
+    batch_size,
+    device,
+    out_dir,
+    split_name,
+    amp_dtype: Optional[torch.dtype],
+    dump_beta: bool = False,          # [MOD] 是否导出 β
+    dump_attn: bool = False,          # [MOD] 是否导出 Emotion Decoder cross-attn
+    attn_max_samples: int = 64,       # [MOD] 最多抓多少样本的注意力（避免太大）
+):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=collate_seq_batch)
     probs, labels = [], []
-    model.eval()
+    betas = []                        # [MOD] 收集 β
 
+    # [MOD] 注意力容器
+    attn_store: Dict[str, Any] = {}
+    if dump_attn:
+        register_emodecoder_attn_hooks(model, attn_store, max_layers=2)
+
+    model.eval()
     use_amp = (device.type == "cuda") and (amp_dtype is not None)
+    seen = 0                          # [MOD] 已处理样本数（控制 attn_max_samples）
+
     for h_a, m_a, h_t, m_t, y in dl:
         h_a = h_a.to(device); m_a = m_a.to(device)
         h_t = h_t.to(device); m_t = m_t.to(device)
@@ -167,12 +216,47 @@ def run_split(model, ds, batch_size, device, out_dir, split_name, amp_dtype: Opt
         probs.append(torch.sigmoid(logits).cpu().numpy())
         labels.append(y.numpy())
 
+        # [MOD] 收集 β（统一转成标量）
+        if dump_beta and beta is not None:
+            b = beta.detach().float().cpu()
+            if b.ndim > 1:
+                # 如果是 [B, d_model] 等，按维度取 mean
+                for _ in range(1, b.ndim):
+                    b = b.mean(dim=-1)
+            betas.append(b.numpy())
+
+        seen += y.size(0)
+        # [MOD] 仅限制注意力采样的样本数（模型仍然跑完整个 dataset）
+        # 如果你想在达到 attn_max_samples 后整段提前 break，可以把下面 if 打开：
+        # if dump_attn and seen >= attn_max_samples:
+        #     break
+
     probs = np.concatenate(probs, axis=0)
     labels = np.concatenate(labels, axis=0)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     np.save(f"{out_dir}/{split_name}_y_prob.npy", probs)
     np.save(f"{out_dir}/{split_name}_y_true.npy", labels)
     print(f"[Saved] {split_name} -> {out_dir}/{split_name}_y_prob.npy, {out_dir}/{split_name}_y_true.npy")
+
+    # [MOD] 保存 β
+    if dump_beta and betas:
+        beta_arr = np.concatenate(betas, axis=0)
+        np.save(f"{out_dir}/{split_name}_beta_mean.npy", beta_arr)
+        print(f"[Saved] {split_name} beta -> {out_dir}/{split_name}_beta_mean.npy")
+
+    # [MOD] 保存 Emotion Decoder cross-attn（前 K 个样本）
+    if dump_attn and "decoder_attn" in attn_store:
+        save_path = Path(out_dir) / f"{split_name}_decoder_attn_first{attn_max_samples}.npz"
+        to_save = {}
+        for k, v in attn_store["decoder_attn"].items():
+            # v 通常形状: [B, num_heads, num_emotions, seq_len]
+            arr = v.numpy() if torch.is_tensor(v) else np.array(v)
+            # 可选：只裁到前 attn_max_samples 个样本
+            if arr.shape[0] > attn_max_samples:
+                arr = arr[:attn_max_samples]
+            to_save[k] = arr
+        np.savez_compressed(save_path, **to_save)
+        print(f"[Saved] {split_name} decoder-attn -> {save_path}")
 
 def _amp_dtype_from_str(s: str) -> Optional[torch.dtype]:
     s = (s or "off").lower()
@@ -202,6 +286,13 @@ def main():
     ap.add_argument("--num_layers_decoder", type=int, default=2)
     ap.add_argument("--beta_hidden", type=int, default=256)
     ap.add_argument("--dropout", type=float, default=0.2)
+    # [MOD] 额外导出控制项
+    ap.add_argument("--dump_beta", action="store_true",
+                    help="保存每个样本的 beta（mean）到 {split}_beta_mean.npy")
+    ap.add_argument("--dump_attn", action="store_true",
+                    help="保存 Emotion Decoder cross-attn 到 {split}_decoder_attn_firstK.npz")
+    ap.add_argument("--attn_max_samples", type=int, default=64,
+                    help="保存注意力时最多保留多少个样本（避免文件过大）")
     args = ap.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -245,7 +336,13 @@ def main():
         args.index_csv_val, a_dir, t_dir, split_name="val",
         max_len_audio=args.max_len_audio, max_len_text=args.max_len_text
     )
-    run_split(model, val_ds, args.batch_size, device, args.out_dir, "val", amp_dtype)
+    run_split(
+        model, val_ds, args.batch_size, device, args.out_dir, "val",
+        amp_dtype,
+        dump_beta=args.dump_beta,
+        dump_attn=args.dump_attn,
+        attn_max_samples=args.attn_max_samples,
+    )
 
     # 推理（test，若提供）
     if args.index_csv_test:
@@ -253,7 +350,13 @@ def main():
             args.index_csv_test, a_dir, t_dir, split_name="test",
             max_len_audio=args.max_len_audio, max_len_text=args.max_len_text
         )
-        run_split(model, test_ds, args.batch_size, device, args.out_dir, "test", amp_dtype)
+        run_split(
+            model, test_ds, args.batch_size, device, args.out_dir, "test",
+            amp_dtype,
+            dump_beta=args.dump_beta,
+            dump_attn=args.dump_attn,
+            attn_max_samples=args.attn_max_samples,
+        )
 
 if __name__ == "__main__":
     main()
