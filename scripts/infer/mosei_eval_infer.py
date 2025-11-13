@@ -4,6 +4,7 @@
 import argparse
 from pathlib import Path
 from typing import List, Tuple, Optional
+import json                               # [MOD] 读取 meta.json
 import numpy as np
 import pandas as pd
 import torch
@@ -40,6 +41,15 @@ def _resolve_feat_dir(root: Optional[str], audio_dir: Optional[str], text_dir: O
         if a.exists() and t.exists():
             return a, t
     raise FileNotFoundError(f"Cannot find audio/text dirs under {root}")
+
+# [MOD] 仅从 meta.json 读取 hidden_dim（最简洁稳定）
+def _read_hidden_dims_from_meta(audio_dir: Path, text_dir: Path) -> Tuple[int, int]:
+    audio_meta = json.loads((audio_dir / "meta.json").read_text())
+    text_meta  = json.loads((text_dir  / "meta.json").read_text())
+    d_audio = int(audio_meta["hidden_dim"])
+    d_text  = int(text_meta["hidden_dim"])
+    print(f"[✓] Loaded hidden dims from meta.json -> audio={d_audio}, text={d_text}")
+    return d_audio, d_text
 
 # ---------- Dataset ----------
 class SeqDataset(Dataset):
@@ -158,11 +168,19 @@ def main():
     # 解析特征目录
     a_dir, t_dir = _resolve_feat_dir(args.features_root, args.audio_dir, args.text_dir)
 
-    # 构建模型并加载权重
+    # [MOD] 从 meta.json 读取输入维度
+    d_audio, d_text = _read_hidden_dims_from_meta(a_dir, t_dir)
+
+    # [MOD] 构建模型时显式传入 d_audio/d_text
     model = MoseiFusionWithEmotionDecoder(
-        d_model=args.d_model, num_emotions=6, n_heads=args.n_heads,
-        num_layers_fusion=args.num_layers_fusion, num_layers_decoder=args.num_layers_decoder,
-        beta_hidden=args.beta_hidden, dropout=args.dropout
+        d_audio=d_audio,                      # [MOD]
+        d_text=d_text,                        # [MOD]
+        d_model=args.d_model, num_emotions=6,
+        n_heads=args.n_heads,
+        num_layers_fusion=args.num_layers_fusion,
+        num_layers_decoder=args.num_layers_decoder,
+        beta_hidden=args.beta_hidden,
+        dropout=args.dropout
     ).to(device)
 
     ckpt = torch.load(args.ckpt, map_location=device)
