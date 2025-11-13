@@ -4,25 +4,30 @@
 import argparse
 from pathlib import Path
 from typing import List, Tuple, Optional
-import json                               # [MOD] 读取 meta.json
+import json
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-# ===== 你的模型（保持 import 不变）=====
 from models.mosei_fusion_with_emotion_decoder import MoseiFusionWithEmotionDecoder
 
 EMO_COLS = ["emo_happy","emo_sad","emo_anger","emo_fear","emo_disgust","emo_surprise"]
 
-# ---------- utils ----------
-def _load_array(p: Path):
+# ------------ utils ------------
+def _load_array_or_hidden(p: Path):
     if not p.exists():
         raise FileNotFoundError(p)
     if p.suffix == ".npy":
-        return np.load(p, allow_pickle=False)
+        return np.load(p, allow_pickle=False)  # [L,D] or [D]
     if p.suffix in (".pt", ".pth"):
         obj = torch.load(p, map_location="cpu")
+        # 支持两种写法：直接tensor / dict{"hidden":...}
+        if isinstance(obj, dict) and "hidden" in obj:
+            arr = obj["hidden"]
+            if isinstance(arr, torch.Tensor):
+                return arr.numpy()
+            return np.array(arr)
         if isinstance(obj, torch.Tensor):
             return obj.numpy()
         return np.array(obj)
@@ -33,16 +38,12 @@ def _resolve_feat_dir(root: Optional[str], audio_dir: Optional[str], text_dir: O
         return Path(audio_dir), Path(text_dir)
     if not root:
         raise ValueError("Either --features_root or (--audio_dir and --text_dir) must be provided.")
-
     r = Path(root)
-    # 支持 root/audio|text 或 root/seq_level/audio|text
-    cand = [(r/"audio", r/"text"), (r/"seq_level"/"audio", r/"seq_level"/"text")]
-    for a, t in cand:
+    for a, t in [(r/"audio", r/"text"), (r/"seq_level"/"audio", r/"seq_level"/"text")]:
         if a.exists() and t.exists():
             return a, t
     raise FileNotFoundError(f"Cannot find audio/text dirs under {root}")
 
-# [MOD] 仅从 meta.json 读取 hidden_dim（最简洁稳定）
 def _read_hidden_dims_from_meta(audio_dir: Path, text_dir: Path) -> Tuple[int, int]:
     audio_meta = json.loads((audio_dir / "meta.json").read_text())
     text_meta  = json.loads((text_dir  / "meta.json").read_text())
@@ -51,22 +52,29 @@ def _read_hidden_dims_from_meta(audio_dir: Path, text_dir: Path) -> Tuple[int, i
     print(f"[✓] Loaded hidden dims from meta.json -> audio={d_audio}, text={d_text}")
     return d_audio, d_text
 
-# ---------- Dataset ----------
+# ------------ Dataset ------------
 class SeqDataset(Dataset):
     """
-    读取一份 index CSV（需含 utter_id；若含 split 列则按 split 过滤）。
-    在 audio_dir、text_dir 下查找 {utter_id}.npy|pt。
+    读 index CSV；优先用 'utter_id'，若不存在则回退 'uid'。
+    若有 split 列，则根据 split_name 过滤。
+    从 audio_dir/text_dir 读取 {uid}.npy|pt|pth。
     """
-    def __init__(self, index_csv: str, audio_dir: str, text_dir: str, split_name: Optional[str]):
+    def __init__(self, index_csv: str, audio_dir: Path, text_dir: Path, split_name: Optional[str]):
         df = pd.read_csv(index_csv)
+        # 选择 uid 列
+        if "utter_id" in df.columns:
+            uid_col = "utter_id"
+        elif "uid" in df.columns:
+            uid_col = "uid"
+        else:
+            raise ValueError("CSV must contain 'utter_id' or 'uid' column")
+
         if split_name and "split" in df.columns:
             df = df[df["split"].astype(str).str.lower() == split_name.lower()].reset_index(drop=True)
-        if "utter_id" not in df.columns:
-            raise ValueError("CSV must contain column 'utter_id'")
 
-        self.uids: List[str] = df["utter_id"].astype(str).tolist()
+        self.uids: List[str] = df[uid_col].astype(str).tolist()
 
-        # 标签（若表里没有情绪列，就全 0）
+        # 标签（如果存在情绪列就带上；否则全 0）
         self.labels = np.zeros((len(self.uids), len(EMO_COLS)), dtype=np.float32)
         if any(c in df.columns for c in EMO_COLS):
             for k, c in enumerate(EMO_COLS):
@@ -86,22 +94,15 @@ class SeqDataset(Dataset):
 
     def __getitem__(self, i: int):
         uid = self.uids[i]
-        a = _load_array(self._find(self.audio_dir, uid))  # [L,Da] or [Da]
-        t = _load_array(self._find(self.text_dir,  uid))  # [L,Dt] or [Dt]
+        a = _load_array_or_hidden(self._find(self.audio_dir, uid))
+        t = _load_array_or_hidden(self._find(self.text_dir,  uid))
         if a.ndim == 1: a = a[None, :]
         if t.ndim == 1: t = t[None, :]
         y = self.labels[i]
         return torch.tensor(a, dtype=torch.float32), torch.tensor(t, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
-# ---------- Collate ----------
+# ------------ Collate ------------
 def collate_seq_batch(batch):
-    """
-    输入: list of (a[L_a,D_a], t[L_t,D_t], y[6])
-    输出:
-      h_a: [B, L_a_max, D_a], mask_a: [B, L_a_max] (True=PAD)
-      h_t: [B, L_t_max, D_t], mask_t: [B, L_t_max]
-      y:   [B, 6]
-    """
     As, Ts, Ys = zip(*batch)
     B = len(batch)
     La = max(x.shape[0] for x in As)
@@ -122,7 +123,7 @@ def collate_seq_batch(batch):
     y = torch.stack(Ys, dim=0)
     return h_a, m_a, h_t, m_t, y
 
-# ---------- Inference ----------
+# ------------ Inference ------------
 @torch.no_grad()
 def run_split(model, ds, batch_size, device, out_dir, split_name):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=collate_seq_batch)
@@ -147,15 +148,15 @@ def main():
     # 数据
     ap.add_argument("--index_csv_val", required=True)
     ap.add_argument("--index_csv_test", default=None)
-    ap.add_argument("--features_root", default=None, help="根目录，内部需有 seq_level/audio|text 或 audio|text")
+    ap.add_argument("--features_root", default=None, help="根目录包含 audio|text 或 seq_level/audio|text")
     ap.add_argument("--audio_dir", default=None)
     ap.add_argument("--text_dir",  default=None)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out_dir", default="outputs")
-    # 模型
+    # 模型（会被 ckpt['args'] 覆盖）
     ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--d_model", type=int, default=384)            # ← 按你训练的配置
+    ap.add_argument("--d_model", type=int, default=384)
     ap.add_argument("--n_heads", type=int, default=6)
     ap.add_argument("--num_layers_fusion", type=int, default=2)
     ap.add_argument("--num_layers_decoder", type=int, default=2)
@@ -165,27 +166,14 @@ def main():
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    # 解析特征目录
+    # 解析特征目录 & 输入维度
     a_dir, t_dir = _resolve_feat_dir(args.features_root, args.audio_dir, args.text_dir)
-
-    # [MOD] 从 meta.json 读取输入维度
     d_audio, d_text = _read_hidden_dims_from_meta(a_dir, t_dir)
 
-    # [MOD] 构建模型时显式传入 d_audio/d_text
-    model = MoseiFusionWithEmotionDecoder(
-        d_audio=d_audio,                      # [MOD]
-        d_text=d_text,                        # [MOD]
-        d_model=args.d_model, num_emotions=6,
-        n_heads=args.n_heads,
-        num_layers_fusion=args.num_layers_fusion,
-        num_layers_decoder=args.num_layers_decoder,
-        beta_hidden=args.beta_hidden,
-        dropout=args.dropout
-    ).to(device)
-
+    # 先加载 ckpt，并用 ckpt["args"] 覆盖超参（与训练完全一致）
     ckpt = torch.load(args.ckpt, map_location=device)
-    if isinstance(ckpt, dict) and "config" in ckpt:
-        cfg = ckpt["config"]
+    if isinstance(ckpt, dict) and "args" in ckpt:
+        cfg = ckpt["args"]
         args.d_model = cfg.get("d_model", args.d_model)
         args.n_heads = cfg.get("n_heads", args.n_heads)
         args.num_layers_fusion = cfg.get("num_layers_fusion", args.num_layers_fusion)
@@ -193,15 +181,27 @@ def main():
         args.beta_hidden = cfg.get("beta_hidden", args.beta_hidden)
         args.dropout = cfg.get("dropout", args.dropout)
 
-    state = ckpt.get("model_state_dict", ckpt)  # 兼容两种保存方式
-    model.load_state_dict(state)
-    model.eval()
+    # 构建模型（用覆盖后的参数）
+    model = MoseiFusionWithEmotionDecoder(
+        d_audio=d_audio,
+        d_text=d_text,
+        d_model=args.d_model,
+        num_emotions=len(EMO_COLS),
+        n_heads=args.n_heads,
+        num_layers_fusion=args.num_layers_fusion,
+        num_layers_decoder=args.num_layers_decoder,
+        beta_hidden=args.beta_hidden,
+        dropout=args.dropout
+    ).to(device)
 
-    # val
+    # 加载权重
+    state = ckpt.get("model_state_dict", ckpt)
+    model.load_state_dict(state)  # strict=True 默认；形状不一致会直接报错
+
+    # 推理
     val_ds = SeqDataset(args.index_csv_val, a_dir, t_dir, split_name="val")
     run_split(model, val_ds, args.batch_size, device, args.out_dir, "val")
 
-    # test（可选）
     if args.index_csv_test:
         test_ds = SeqDataset(args.index_csv_test, a_dir, t_dir, split_name="test")
         run_split(model, test_ds, args.batch_size, device, args.out_dir, "test")
