@@ -149,30 +149,51 @@ def collate_seq_batch(batch):
 # ============== [MOD] hooks: 捕获 Emotion Decoder cross-attn ==============
 def register_emodecoder_attn_hooks(model: torch.nn.Module, store: Dict[str, Any], max_layers: int = 2):
     """
-    在 Emotion Decoder 的 cross-attn 上注册 forward hooks，记录注意力矩阵。
+    在 Emotion Decoder 的 cross-attn (encoder-decoder attention) 上注册 forward hooks，
+    记录注意力矩阵。
 
-    匹配规则（通用版）：
-      - 模块名里同时包含 "emotion" 和 "decoder"
-      - 且包含 "cross_attn" 或 "crossattn"
-      - 若名字中包含 "layers.N."，则只保留前 max_layers 层
+    你的结构大致是：
+      model.backbone.emotion_decoder.decoder.layers[i].multihead_attn
+
+    我们就专门找：
+      - 模块类型是 nn.MultiheadAttention
+      - 名字里包含 "emotion_decoder.decoder.layers"
+      - 只保留前 max_layers 个 layer
     """
     for name, module in model.named_modules():
-        lname = name.lower()
-        if "emotion" in lname and "decoder" in lname and ("cross_attn" in lname or "crossattn" in lname):
-            # 限层数（如果你的 EmotionDecoder 用 layers.N 命名）
-            if "layers" in lname:
-                try:
-                    layer_idx = int(lname.split("layers.")[1].split(".")[0])
-                    if layer_idx >= max_layers:
-                        continue
-                except Exception:
-                    pass
+        # 只关心 MultiheadAttention
+        if not isinstance(module, torch.nn.MultiheadAttention):
+            continue
 
-            def _hook(m, inp, out, _n=name):
-                # torch.nn.MultiheadAttention 返回 (out, attn_weights)
-                if isinstance(out, tuple) and len(out) == 2:
-                    store.setdefault("decoder_attn", {})[_n] = out[1].detach().cpu()
-            module.register_forward_hook(_hook)
+        # 只要 EmotionDecoder 里的 decoder.layers.*
+        # 典型名字形如: "backbone.emotion_decoder.decoder.layers.0.multihead_attn"
+        if "emotion_decoder" not in name or "decoder.layers" not in name:
+            continue
+
+        # 解析层编号，限制到前 max_layers 层
+        layer_idx = None
+        try:
+            # 拆出 "layers.<idx>."
+            after = name.split("decoder.layers.", 1)[1]
+            layer_idx = int(after.split(".", 1)[0])
+        except Exception:
+            pass
+
+        if layer_idx is not None and layer_idx >= max_layers:
+            continue
+
+        def _hook(m, inp, out, _n=name):
+            """
+            MultiheadAttention forward 返回:
+              - out[0]: attn_output  [B, L_q, d]
+              - out[1]: attn_weights [B, num_heads, L_q, L_k]
+            我们只存 attn_weights。
+            """
+            if isinstance(out, tuple) and len(out) == 2:
+                attn_weights = out[1].detach().cpu()
+                store.setdefault("decoder_attn", {})[_n] = attn_weights
+
+        module.register_forward_hook(_hook)
 
     return store
 
