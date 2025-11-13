@@ -184,6 +184,15 @@ def main():
     ).to(device)
 
     ckpt = torch.load(args.ckpt, map_location=device)
+    if isinstance(ckpt, dict) and "config" in ckpt:
+        cfg = ckpt["config"]
+        args.d_model = cfg.get("d_model", args.d_model)
+        args.n_heads = cfg.get("n_heads", args.n_heads)
+        args.num_layers_fusion = cfg.get("num_layers_fusion", args.num_layers_fusion)
+        args.num_layers_decoder = cfg.get("num_layers_decoder", args.num_layers_decoder)
+        args.beta_hidden = cfg.get("beta_hidden", args.beta_hidden)
+        args.dropout = cfg.get("dropout", args.dropout)
+
     state = ckpt.get("model_state_dict", ckpt)  # 兼容两种保存方式
     model.load_state_dict(state)
     model.eval()
