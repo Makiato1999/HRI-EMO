@@ -155,25 +155,28 @@ def register_emodecoder_attn_hooks(model: torch.nn.Module, store: Dict[str, Any]
     你的结构大致是：
       model.backbone.emotion_decoder.decoder.layers[i].multihead_attn
 
-    我们就专门找：
-      - 模块类型是 nn.MultiheadAttention
+    我们只抓：
+      - 模块类型是 MultiheadAttention
       - 名字里包含 "emotion_decoder.decoder.layers"
+      - 名字里包含 ".multihead_attn"（排除 self_attn）
       - 只保留前 max_layers 个 layer
     """
     for name, module in model.named_modules():
-        # 只关心 MultiheadAttention
+        # 1) 只关心 MultiheadAttention
         if not isinstance(module, torch.nn.MultiheadAttention):
             continue
 
-        # 只要 EmotionDecoder 里的 decoder.layers.*
-        # 典型名字形如: "backbone.emotion_decoder.decoder.layers.0.multihead_attn"
+        # 2) 限定在 EmotionDecoder 的 decoder.layers 里
         if "emotion_decoder" not in name or "decoder.layers" not in name:
             continue
 
-        # 解析层编号，限制到前 max_layers 层
+        # 3) 只抓 cross-attn：multihead_attn；跳过 self_attn
+        if ".multihead_attn" not in name:
+            continue
+
+        # 4) 解析层编号，限制到前 max_layers 层
         layer_idx = None
         try:
-            # 拆出 "layers.<idx>."
             after = name.split("decoder.layers.", 1)[1]
             layer_idx = int(after.split(".", 1)[0])
         except Exception:
@@ -185,18 +188,30 @@ def register_emodecoder_attn_hooks(model: torch.nn.Module, store: Dict[str, Any]
         def _hook(m, inp, out, _n=name):
             """
             MultiheadAttention forward 返回:
-              - out[0]: attn_output  [B, L_q, d]
-              - out[1]: attn_weights [B, num_heads, L_q, L_k]
-            我们只存 attn_weights。
+              - out[0]: attn_output
+              - out[1]: attn_weights 或 None（当 need_weights=False 时）
+
+            这里必须确认 out[1] 不为 None 再存。
             """
-            if isinstance(out, tuple) and len(out) == 2:
-                attn_weights = out[1].detach().cpu()
-                store.setdefault("decoder_attn", {})[_n] = attn_weights
+            if not (isinstance(out, tuple) and len(out) == 2):
+                return
+
+            attn_weights = out[1]
+            if attn_weights is None:
+                # 当前 PyTorch 默认 need_weights=False，会走到这里；先安全退出，避免报错。
+                return
+
+            store.setdefault("decoder_attn", {})[_n] = attn_weights.detach().cpu()
 
         module.register_forward_hook(_hook)
 
     return store
-
+"""
+attn_weights 很可能仍然是 None，因为 PyTorch 在 decoder 里调用 MultiheadAttention 时默认 need_weights=False。
+也就是说：现在这版是“安全的”：不会再崩；如果将来你改 EmotionDecoder 的实现让它返回权重，这里的 hook 会自动开始工作。
+但要真想拿到 非 None 的 decoder cross-attn heatmap，下一步我们得改 EmotionDecoder，手动循环 decoder.layers
+在调用层时传 need_weights=True 或绕过 nn.TransformerDecoder 的默认逻辑。
+"""
 # ---------------- Inference ----------------
 @torch.no_grad()
 def run_split(
