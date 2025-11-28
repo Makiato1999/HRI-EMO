@@ -52,12 +52,28 @@ class MoseiFusionWithEmotionDecoder(nn.Module):
             dropout=dropout,
         )
 
-    def forward(self, h_a, h_t, mask_a=None, mask_t=None):
+    def forward(
+        self, 
+        h_a, 
+        h_t, 
+        mask_a=None, 
+        mask_t=None, 
+        return_attention=False  # <--- [新增] 接收开关
+    ):
         # [B, L_a, d_audio] -> [B, L_a, d_model]
         h_a_proj = self.audio_proj(h_a)
         # [B, L_t, d_text] -> [B, L_t, d_model]
         h_t_proj = self.text_proj(h_t)
 
-        # Call backbone (it expects aligned dims already)
-        logits, beta, fused = self.backbone(h_a_proj, h_t_proj, mask_a, mask_t)
-        return logits, beta, fused
+        # [M] 根据开关决定传递参数和接收返回值的数量
+        if return_attention:
+            # 这里的 backbone 已经被我们修改过，会返回 4 个值
+            logits, beta, fused, attn_pack = self.backbone(
+                h_a_proj, h_t_proj, mask_a, mask_t, return_attention=True
+            )
+            return logits, beta, fused, attn_pack
+        else:
+            logits, beta, fused = self.backbone(
+                h_a_proj, h_t_proj, mask_a, mask_t, return_attention=False
+            )
+            return logits, beta, fused
