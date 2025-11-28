@@ -143,13 +143,13 @@ class FusionWithEmotionDecoder(nn.Module):
 
         # 2) cross-modal semantic alignment (can handle different lengths)
         if return_attention:
-            h_a_tilde, h_t_tilde = self.cross_modal(
+            h_a_tilde, h_t_tilde, encoder_attns = self.cross_modal(
                 h_a, h_t, mask_a, mask_t,
                 return_attention=True
             )
         # shapes: [B, L_a, d], [B, L_t, d]
         else:
-            h_a_tilde, h_t_tilde = self.cross_modal(
+            h_a_tilde, h_t_tilde  = self.cross_modal(
                 h_a, h_t, mask_a, mask_t, 
                 return_attention=False
             )
