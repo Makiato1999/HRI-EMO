@@ -54,11 +54,7 @@ python scripts/fusion/train_mosei_fusion_seq_level_decoder.py \
   --select_by calibrated_macro_f1 \
   --save_calibrated_ths \
   --seed 1234
-
-
-
-
-
+```
 
 #### train_fusion_utter_level.py
 ```bash
@@ -72,6 +68,7 @@ python -m scripts.fusion.train_fusion_utter_level \
   --dropout 0.3 \
   --out_dir runs/fusion_utter_level_dp03
 ```
+
 
 #### train_fusion_seq_level.py
 ```bash
@@ -112,6 +109,4 @@ python -m scripts.fusion.train_fusion_seq_level \
   --save_calibrated_ths \
   --out_dir /content/drive/MyDrive/ColabNotebooks/beta_decoder_project/HRI-EMO-results/mosei_fusion_decoder_small \
   --seed 1234
-
-
 ```
