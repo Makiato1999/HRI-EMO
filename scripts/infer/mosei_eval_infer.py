@@ -146,72 +146,6 @@ def collate_seq_batch(batch):
     y = torch.stack(Ys, dim=0)
     return h_a, m_a, h_t, m_t, y
 
-# ============== [MOD] hooks: 捕获 Emotion Decoder cross-attn ==============
-def register_emodecoder_attn_hooks(model: torch.nn.Module, store: Dict[str, Any], max_layers: int = 2):
-    """
-    在 Emotion Decoder 的 cross-attn (encoder-decoder attention) 上注册 forward hooks，
-    记录注意力矩阵。
-
-    你的结构大致是：
-      model.backbone.emotion_decoder.decoder.layers[i].multihead_attn
-
-    我们只抓：
-      - 模块类型是 MultiheadAttention
-      - 名字里包含 "emotion_decoder.decoder.layers"
-      - 名字里包含 ".multihead_attn"（排除 self_attn）
-      - 只保留前 max_layers 个 layer
-    """
-    for name, module in model.named_modules():
-        # 1) 只关心 MultiheadAttention
-        if not isinstance(module, torch.nn.MultiheadAttention):
-            continue
-
-        # 2) 限定在 EmotionDecoder 的 decoder.layers 里
-        if "emotion_decoder" not in name or "decoder.layers" not in name:
-            continue
-
-        # 3) 只抓 cross-attn：multihead_attn；跳过 self_attn
-        if ".multihead_attn" not in name:
-            continue
-
-        # 4) 解析层编号，限制到前 max_layers 层
-        layer_idx = None
-        try:
-            after = name.split("decoder.layers.", 1)[1]
-            layer_idx = int(after.split(".", 1)[0])
-        except Exception:
-            pass
-
-        if layer_idx is not None and layer_idx >= max_layers:
-            continue
-
-        def _hook(m, inp, out, _n=name):
-            """
-            MultiheadAttention forward 返回:
-              - out[0]: attn_output
-              - out[1]: attn_weights 或 None（当 need_weights=False 时）
-
-            这里必须确认 out[1] 不为 None 再存。
-            """
-            if not (isinstance(out, tuple) and len(out) == 2):
-                return
-
-            attn_weights = out[1]
-            if attn_weights is None:
-                # 当前 PyTorch 默认 need_weights=False，会走到这里；先安全退出，避免报错。
-                return
-
-            store.setdefault("decoder_attn", {})[_n] = attn_weights.detach().cpu()
-
-        module.register_forward_hook(_hook)
-
-    return store
-"""
-attn_weights 很可能仍然是 None，因为 PyTorch 在 decoder 里调用 MultiheadAttention 时默认 need_weights=False。
-也就是说：现在这版是“安全的”：不会再崩；如果将来你改 EmotionDecoder 的实现让它返回权重，这里的 hook 会自动开始工作。
-但要真想拿到 非 None 的 decoder cross-attn heatmap，下一步我们得改 EmotionDecoder，手动循环 decoder.layers
-在调用层时传 need_weights=True 或绕过 nn.TransformerDecoder 的默认逻辑。
-"""
 # ---------------- Inference ----------------
 @torch.no_grad()
 def run_split(
@@ -227,27 +161,78 @@ def run_split(
     attn_max_samples: int = 64,       # [MOD] 最多抓多少样本的注意力（避免太大）
 ):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=collate_seq_batch)
-    probs, labels = [], []
-    betas = []                        # [MOD] 收集 β
+    
+    # 结果容器
+    probs, labels, betas = [], [], []
 
-    # [MOD] 注意力容器
-    attn_store: Dict[str, Any] = {}
-    if dump_attn:
-        register_emodecoder_attn_hooks(model, attn_store, max_layers=2)
+    # [MOD] Attention 容器
+    # 结构: {"encoder": [layer1_list, layer2_list...], "decoder": [layer1_list...]}
+    # 为了简化，我们存成 List of Batch Dicts，最后保存整个对象
+    collected_attns = {
+        "encoder": [], # 每一项将是一个 batch 的 encoder attention
+        "decoder": []  # 每一项将是一个 batch 的 decoder attention
+    }
 
     model.eval()
     use_amp = (device.type == "cuda") and (amp_dtype is not None)
-    seen = 0                          # [MOD] 已处理样本数（控制 attn_max_samples）
+
+    seen_attn_samples = 0 # 计数器, 防止保存过多撑爆内存
 
     for h_a, m_a, h_t, m_t, y in dl:
         h_a = h_a.to(device); m_a = m_a.to(device)
         h_t = h_t.to(device); m_t = m_t.to(device)
+        curr_bs = h_a.size(0)
+        
+        # [MOD] 根据 dump_attn 决定是否开启 return_attention
+        # 注意：这需要你的模型 forward 支持 return_attention 参数
+        # ---------------- 核心修改逻辑 ----------------
+        if dump_attn:
+            # 此时我们期望模型返回 4 个值
+            # logits, beta, z, (encoder_attns, decoder_attns)
+            # 具体的解包逻辑取决于我们在 EmotionDecoder 里的最终实现
 
-        if use_amp:
-            with torch.autocast(device_type="cuda", dtype=amp_dtype):
-                logits, beta, _ = model(h_a, h_t, m_a, m_t)
+            # 开启 return_attention=True
+            with torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else torch.no_grad(): # Use torch.no_grad context or nullcontext
+                 # 期望返回 4 个值: logits, beta, z, attn_pack
+                 ret = model(h_a, h_t, m_a, m_t, return_attention=True)
+            
+            if len(ret) == 4:
+                logits, beta, z, attn_pack = ret
+            else:
+                # 兼容性 Fallback (如果模型没改对)
+                logits, beta, z = ret[0], ret[1], ret[2]
+                attn_pack = None
+
+            # --- 处理 Attention ---
+            # 只有当收集的样本数还未达到上限时，才处理并保存 Attention
+            if attn_pack is not None and seen_attn_samples < attn_max_samples:
+
+                # 1. Encoder Attention [https://github.com/Makiato1999/HRI-EMO/issues/1]
+                # attn_pack['encoder'] 是一个 list (对应 num_layers)，每个元素是一个 dict
+                if "encoder" in attn_pack and attn_pack["encoder"] is not None:
+                    batch_encoder_layers = []
+                    for layer_dict in attn_pack["encoder"]:
+                        # 将 dict 中的 tensor 转为 cpu numpy
+                        clean_dict = {k: v.detach().float().cpu().numpy() for k, v in layer_dict.items()}
+                        batch_encoder_layers.append(clean_dict)
+                    collected_attns["encoder"].append(batch_encoder_layers)
+
+                # 2. Decoder Attention [https://github.com/Makiato1999/HRI-EMO/issues/2]
+                # attn_pack['decoder'] 是一个 list (对应 num_layers)，每个元素是一个 tensor [B, NumEmo, L]
+                if "decoder" in attn_pack and attn_pack["decoder"] is not None:
+                    batch_decoder_layers = []
+                    for layer_tensor in attn_pack["decoder"]:
+                        # 将 tensor 转为 cpu numpy
+                        batch_decoder_layers.append(layer_tensor.detach().float().cpu().numpy())
+                    collected_attns["decoder"].append(batch_decoder_layers)
+                
+                seen_attn_samples += curr_bs
+
         else:
-            logits, beta, _ = model(h_a, h_t, m_a, m_t)
+            # 正常推理 (不开启 attention)
+            with torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else torch.no_grad():
+                logits, beta, z = model(h_a, h_t, m_a, m_t, return_attention=False)
+        # ---------------- 结束修改 ----------------
 
         probs.append(torch.sigmoid(logits).cpu().numpy())
         labels.append(y.numpy())
@@ -260,13 +245,8 @@ def run_split(
                 for _ in range(1, b.ndim):
                     b = b.mean(dim=-1)
             betas.append(b.numpy())
-
-        seen += y.size(0)
-        # [MOD] 仅限制注意力采样的样本数（模型仍然跑完整个 dataset）
-        # 如果你想在达到 attn_max_samples 后整段提前 break，可以把下面 if 打开：
-        # if dump_attn and seen >= attn_max_samples:
-        #     break
-
+    
+    # --- 保存结果 ---
     probs = np.concatenate(probs, axis=0)
     labels = np.concatenate(labels, axis=0)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -279,20 +259,15 @@ def run_split(
         beta_arr = np.concatenate(betas, axis=0)
         np.save(f"{out_dir}/{split_name}_beta_mean.npy", beta_arr)
         print(f"[Saved] {split_name} beta -> {out_dir}/{split_name}_beta_mean.npy")
-
-    # [MOD] 保存 Emotion Decoder cross-attn（前 K 个样本）
-    if dump_attn and "decoder_attn" in attn_store:
-        save_path = Path(out_dir) / f"{split_name}_decoder_attn_first{attn_max_samples}.npz"
-        to_save = {}
-        for k, v in attn_store["decoder_attn"].items():
-            # v 通常形状: [B, num_heads, num_emotions, seq_len]
-            arr = v.numpy() if torch.is_tensor(v) else np.array(v)
-            # 可选：只裁到前 attn_max_samples 个样本
-            if arr.shape[0] > attn_max_samples:
-                arr = arr[:attn_max_samples]
-            to_save[k] = arr
-        np.savez_compressed(save_path, **to_save)
-        print(f"[Saved] {split_name} decoder-attn -> {save_path}")
+    
+    # [MOD] 保存 Attention
+    if dump_attn:
+        # 使用 torch.save 保存字典结构 (因为包含了 list of dicts, numpy 等混合结构)
+        # 读取时用: attns = torch.load('..._attentions.pt')
+        save_path = f"{out_dir}/{split_name}_attentions.pt"
+        torch.save(collected_attns, save_path)
+        print(f"[Saved] {split_name} attentions (Issue 1 & 2) -> {save_path}")
+        print(f"        Captured {seen_attn_samples} samples.")
 
 def _amp_dtype_from_str(s: str) -> Optional[torch.dtype]:
     s = (s or "off").lower()

@@ -65,50 +65,64 @@ class CrossModalBlock(nn.Module):
         h_t: torch.Tensor,                  # [B, L_t, d]
         mask_a: torch.Tensor | None = None, # [B, L_a], True = PAD
         mask_t: torch.Tensor | None = None, # [B, L_t]
+        return_attention: bool = False  # <--- 新增参数
     ):
+        attn_maps = {} # 用于存储注意力权重
+
         # 1) Intra-modal self-attention
         # Audio self-attention
-        a_sa, _ = self.self_attn_a(
+        a_sa, w_a_sa = self.self_attn_a(
             query=h_a,
             key=h_a,
             value=h_a,
             key_padding_mask=mask_a,
-            need_weights=False,
+            need_weights=return_attention, # <--- 动态开关
         )
         h_a_self = self.self_norm_a(h_a + self.dropout(a_sa))
+        if return_attention: attn_maps['audio_self'] = w_a_sa
 
         # Text self-attention
-        t_sa, _ = self.self_attn_t(
+        t_sa, w_t_sa = self.self_attn_t(
             query=h_t,
             key=h_t,
             value=h_t,
             key_padding_mask=mask_t,
-            need_weights=False,
+            need_weights=return_attention, # <--- 动态开关
         )
         h_t_self = self.self_norm_t(h_t + self.dropout(t_sa))
+        if return_attention: attn_maps['text_self'] = w_t_sa
 
         # 2) Cross-modal attention: audio attends to text
-        # audio query → text key/value
-        a2t, _ = self.attn_a2t(
+        # Audio query → text key/value (Audio关注Text哪里)
+        # 这就是 Cross-Modal Alignment
+        a2t, w_a2t = self.attn_a2t(
             query=h_a_self,
             key=h_t_self,
             value=h_t_self,
             key_padding_mask=mask_t,
-            need_weights=False,
+            need_weights=return_attention,
         )
         h_a_cm = self.norm_a1(h_a_self + self.dropout(a2t))
         h_a_cm = self.norm_a2(h_a_cm + self.dropout(self.ffn_a(h_a_cm)))
+        if return_attention: attn_maps['audio_queries_text'] = w_a2t
 
         # 3) Cross-modal attention: text attends to audio
-        t2a, _ = self.attn_t2a(
+        # Text query -> Audio key/value (Text关注Audio哪里)
+        t2a, w_t2a = self.attn_t2a(
             query=h_t_self,
             key=h_a_self,
             value=h_a_self,
             key_padding_mask=mask_a,
-            need_weights=False,
+            need_weights=return_attention,
         )
         h_t_cm = self.norm_t1(h_t_self + self.dropout(t2a))
         h_t_cm = self.norm_t2(h_t_cm + self.dropout(self.ffn_t(h_t_cm)))
+        if return_attention: attn_maps['text_queries_audio'] = w_t2a
+
+        if return_attention:
+            return h_a_cm, h_t_cm, attn_maps
+        else:
+            return h_a_cm, h_t_cm
 
         return h_a_cm, h_t_cm
 
@@ -135,7 +149,18 @@ class CrossModalTransformer(nn.Module):
         h_t: torch.Tensor,
         mask_a: torch.Tensor | None = None,
         mask_t: torch.Tensor | None = None,
+        return_attention: bool = False # <--- 传递给 Block
     ):
-        for layer in self.layers:
-            h_a, h_t = layer(h_a, h_t, mask_a, mask_t)
-        return h_a, h_t
+        all_layers_attn = [] # 存储每一层的注意力
+
+        for i, layer in enumerate(self.layers):
+            if return_attention:
+                h_a, h_t, attn_maps = layer(h_a, h_t, mask_a, mask_t, return_attention=True)
+                all_layers_attn.append(attn_maps)
+            else:
+                h_a, h_t = layer(h_a, h_t, mask_a, mask_t, return_attention=False)
+
+        if return_attention:
+            return h_a, h_t, all_layers_attn
+        else:
+            return h_a, h_t

@@ -4,12 +4,13 @@ import torch.nn as nn
 
 from .cross_modal_block_tacfn import CrossModalTransformer
 from .beta_gate_tacfn import BetaGate
+from .emotion_decoder import EmotionDecoder
 
 
 class FusionWithEmotionDecoder(nn.Module):
     """
     Full model:
-      Cross-modal Transformer + Vector-wise β-Gate + Emotion-Level Decoder.
+        Cross-modal Transformer + Vector-wise β-Gate + Emotion-Level Decoder.
 
     Used for:
       - Sequence-level multimodal inputs
@@ -28,8 +29,6 @@ class FusionWithEmotionDecoder(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-
-        from .emotion_decoder import EmotionDecoder
 
         # 1) Cross-modal encoder (TACFN-style)
         self.cross_modal = CrossModalTransformer(
@@ -124,6 +123,7 @@ class FusionWithEmotionDecoder(nn.Module):
         h_t: torch.Tensor,
         mask_a: torch.Tensor | None = None,
         mask_t: torch.Tensor | None = None,
+        return_attention: bool = False  # <--- 1. 新增参数
     ):
         """
         Args:
@@ -142,9 +142,19 @@ class FusionWithEmotionDecoder(nn.Module):
         h_t = self._ensure_3d(h_t)
 
         # 2) cross-modal semantic alignment (can handle different lengths)
-        h_a_tilde, h_t_tilde = self.cross_modal(h_a, h_t, mask_a, mask_t)
+        if return_attention:
+            h_a_tilde, h_t_tilde = self.cross_modal(
+                h_a, h_t, mask_a, mask_t,
+                return_attention=True
+            )
         # shapes: [B, L_a, d], [B, L_t, d]
-
+        else:
+            h_a_tilde, h_t_tilde = self.cross_modal(
+                h_a, h_t, mask_a, mask_t, 
+                return_attention=False
+            )
+            encoder_attns = None
+        
         # 3) β-gated fusion (this will internally align L)
         h_fusion, beta = self.beta_gate(h_a_tilde, h_t_tilde, mask_a, mask_t)
         # h_fusion: [B, L_fused, d]
@@ -156,6 +166,7 @@ class FusionWithEmotionDecoder(nn.Module):
         # fused_mask: [B, L_fused] or None
 
         # 5) emotion-level decoding
+        # (先把 Decoder 的可解释性留空，等下个 issue 再加)
         z, logits = self.emotion_decoder(
             memory=h_fusion,
             memory_key_padding_mask=fused_mask,
@@ -163,4 +174,9 @@ class FusionWithEmotionDecoder(nn.Module):
         # z: [B, num_emotions, d]
         # logits: [B, num_emotions]
 
-        return logits, beta, z
+        # 返回结果
+        if return_attention:
+            # 这里的结构是：logits, beta, z, 还有为了可解释性新增的 attention
+            return logits, beta, z, encoder_attns
+        else:
+            return logits, beta, z
