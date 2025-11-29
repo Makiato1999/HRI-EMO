@@ -51,6 +51,7 @@ python scripts/fusion/train_mosei_fusion_seq_level_decoder.py \
   --select_by calibrated_macro_f1 \
   --save_calibrated_ths \
   --seed 1234
+```
 
 ## ✅ Output
 ```
