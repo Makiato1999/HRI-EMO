@@ -13,26 +13,23 @@ It focuses on training the **Cross-Modal Fusion + Emotion Decoder** architecture
 
 ---
 
-## 🚀 How to Run
+## 🚀 Quick Start
+
+You can run experiments interactively via the Notebook or directly via the Command Line Interface (CLI).
 
 ### Option 1: Using the Notebook (Recommended)
-Open **`mosei_train.ipynb`**. It contains pre-configured cells for different experiment versions (e.g., v1, v2). Just uncomment the version you want to run and execute the cell.
+Open **`mosei_train.ipynb`**. Uncomment the "v2" configuration cell to run the optimized training routine.
 
 ### Option 2: Command Line Interface (CLI)
-You can run the python script directly from the terminal.
 
-#### ➤ Recommended Configuration (v2)
-*This configuration is optimized for generalization (prevents overfitting).*
-
-**Key Hyperparameters:**
-* `--num_layers_fusion 1` (Simplified fusion to force learning core patterns)
-* `--dropout 0.4` (High dropout for regularization)
-* `--select_by calibrated_macro_f1` (Save best model based on F1, not just Loss)
+Below is the **v2 Configuration (Best Generalization)**. This setup solves overfitting by simplifying the model and increasing regularization.
 
 ```bash
-# Ensure you are in the project root
+# 1. Setup path
+cd /content/HRI-EMO
 export PYTHONPATH=.
 
+# 2. Run Training (v2 Config)
 python scripts/fusion/train_mosei_fusion_seq_level_decoder.py \
   --index_csv data/mosei_index_splits.csv \
   --audio_dir features/mosei/seq_level/audio \
@@ -54,59 +51,3 @@ python scripts/fusion/train_mosei_fusion_seq_level_decoder.py \
   --select_by calibrated_macro_f1 \
   --save_calibrated_ths \
   --seed 1234
-```
-
-#### train_fusion_utter_level.py
-```bash
-python -m scripts.fusion.train_fusion_utter_level \
-  --csv data/iemocap_index_splits.csv \
-  --audio_dir features/utter_level/audio \
-  --text_dir features/utter_level/text \
-  --epochs 20 \
-  --batch_size 64 \
-  --lr 1e-4 \
-  --dropout 0.3 \
-  --out_dir runs/fusion_utter_level_dp03
-```
-
-
-#### train_fusion_seq_level.py
-```bash
-python -m scripts.fusion.train_fusion_seq_level \
-  --csv data/iemocap_index_splits.csv \
-  --audio_dir features/seq_level/audio \
-  --text_dir features/seq_level/text \
-  --epochs 10 \
-  --batch_size 8 \
-  --lr 1e-4 \
-  --dropout 0.2 \
-  --out_dir runs/fusion_seq_level_tacfn_like
-```
-
-
-#### Colab 
-```bash
-!python -m scripts.fusion.train_mosei_fusion_seq_level_decoder \
-  --index_csv ../data/mosei_index_splits.csv \
-  --audio_dir ../features/mosei/seq_level/audio \
-  --text_dir ../features/mosei/seq_level/text \
-  --epochs 20 \
-  --batch_size 8 \
-  --grad_accum 4 \
-  --warmup_ratio 0.1 \
-  --beta_entropy 1e-3 \
-  --max_len_audio 300 \
-  --max_len_text 128 \
-  --d_model 384 \
-  --n_heads 6 \
-  --num_layers_fusion 2 \
-  --num_layers_decoder 2 \
-  --dropout 0.2 \
-  --lr 1e-4 \
-  --weight_decay 1e-2 \
-  --num_workers 2 \
-  --select_by macro_auc \
-  --save_calibrated_ths \
-  --out_dir /content/drive/MyDrive/ColabNotebooks/beta_decoder_project/HRI-EMO-results/mosei_fusion_decoder_small \
-  --seed 1234
-```
