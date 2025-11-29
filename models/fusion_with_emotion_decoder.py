@@ -167,16 +167,31 @@ class FusionWithEmotionDecoder(nn.Module):
 
         # 5) emotion-level decoding
         # (先把 Decoder 的可解释性留空，等下个 issue 再加)
-        z, logits = self.emotion_decoder(
-            memory=h_fusion,
-            memory_key_padding_mask=fused_mask,
-        )
-        # z: [B, num_emotions, d]
-        # logits: [B, num_emotions]
-
-        # 返回结果
         if return_attention:
-            # 这里的结构是：logits, beta, z, 还有为了可解释性新增的 attention
-            return logits, beta, z, encoder_attns
+            # 开启 attention 时，接收 3 个返回值 (z, logits, attn)
+            z, logits, decoder_attns = self.emotion_decoder(
+                memory=h_fusion,
+                memory_key_padding_mask=fused_mask,
+                return_attention=True
+            )
         else:
+            # 关闭 attention 时，只接收 2 个返回值 (z, logits)
+            z, logits = self.emotion_decoder(
+                memory=h_fusion,
+                memory_key_padding_mask=fused_mask,
+                return_attention=False
+            )
+            decoder_attns = None
+
+        # 5) Return
+        if return_attention:
+            # 打包所有 attention
+            attn_pack = {
+                "encoder": encoder_attns,
+                "decoder": decoder_attns
+            }
+            # 返回 4 个值
+            return logits, beta, z, attn_pack
+        else:
+            # 训练模式，只返回 3 个值
             return logits, beta, z
