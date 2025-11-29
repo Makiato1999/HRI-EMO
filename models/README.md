@@ -1,121 +1,108 @@
-# TACFN-inspired Cross-Modal Fusion Network
+# Adaptive Unified Multimodal Emotion Recognition Framework
 
-This folder implements a **Transformer-based adaptive fusion network** for multimodal emotion recognition, inspired by TACFN-style cross-modal interaction and extended to pretrained encoders (BERT, WavLM).
+This directory implements the core architecture of the **Adaptive Unified Multimodal Emotion Recognition Framework**.
 
-We assume utterance-level or sequence-level features have already been extracted, e.g.:
-
-- Text: hidden states from BERT
-- Audio: hidden states from WavLM
-
-The fusion network operates purely on these features.
+The framework is designed to be **modular and unified**, capable of handling both MOSEI and IEMOCAP features by swapping encoders and decoders.
 
 ---
 
-## 1. cross_modal_block_tacfn.py — CrossModalTransformer
+## 🏗️ 1. Core Framework (Sequence-Level / MOSEI)
+*Current SOTA configuration used in the main experiments.*
 
+| File Name | Component | Description |
+| :--- | :--- | :--- |
+| **`mosei_fusion_with_emotion_decoder.py`** | **Wrapper** | **[Top-Level]** Projects audio/text features to a shared `d_model` and calls the backbone. |
+| **`fusion_with_emotion_decoder.py`** | **Backbone** | **[The Pipeline]** Connects Encoder $\to$ Fusion $\to$ Decoder. Manages `return_attention` flow for explainability. |
+| **`cross_modal_block_tacfn.py`** | Encoder | **[Module 1]** Cross-Modal Transformer (Alignment). |
+| **`beta_gate_tacfn.py`** | Fusion | **[Module 2]** Vector-wise Beta Gating (Adaptive Fusion). |
+| **`emotion_decoder.py`** | Decoder | **[Module 3]** Query-based Emotion Decoder (Attribution). |
+
+---
+
+## 📘 2. Technical Details (Core Modules)
+
+### A. Encoder: `cross_modal_block_tacfn.py`
 **Goal:** Reduce intra-modal redundancy and align audio–text representations.
 
-**Key ideas:**
-
-1. **Intra-modal self-attention**
-   - Each modality (audio/text) first passes through a self-attention layer.
-   - Highlights salient frames/tokens and suppresses noisy ones.
-   - Implemented with residual connections and LayerNorm.
-
-2. **Bidirectional cross-modal attention**
-   - Audio attends to text, and text attends to audio.
-   - Captures complementary cues across modalities.
-   - Followed by FFN + residual + LayerNorm (Transformer encoder style).
+**Key Mechanism:**
+1.  **Intra-modal self-attention**: Each modality first passes through a self-attention layer to highlight salient cues.
+2.  **Bidirectional cross-modal attention**: Audio attends to text, and text attends to audio.
+3.  **Explainability (Issue #1)**: Supports `return_attention=True` to export the Audio-Text alignment map.
 
 **Input/Output:**
+* Input: `h_a` $[B, L_a, d]$, `h_t` $[B, L_t, d]$
+* Output: `h_a_tilde`, `h_t_tilde` (Aligned features)
 
-- Input:
-  - `h_a`: `[B, L_a, d]` audio sequence
-  - `h_t`: `[B, L_t, d]` text sequence
-  - optional padding masks `mask_a`, `mask_t` (True = PAD)
-- Output:
-  - `h_a_tilde`: `[B, L_a, d]`
-  - `h_t_tilde`: `[B, L_t, d]`
+### B. Fusion: `beta_gate_tacfn.py`
+**Goal:** Learn an adaptive, fine-grained fusion using a **per-dimension gating vector**.
 
-This module is fully compatible with:
-- utterance-level (use `L=1`),
-- sequence-level (use full `[L, d]` features).
+**Algorithm:**
+1.  **Normalization**: $\tilde{h}_a = LN(h_a),\quad \tilde{h}_t = LN(h_t)$
+2.  **Pooling**: $a = \text{Pool}(\tilde{h}_a),\quad t = \text{Pool}(\tilde{h}_t)$
+3.  **Gate Construction**: $g = [a,\ t,\ |a-t|,\ a \odot t]$
+4.  **Prediction**: $w = \sigma(\text{MLP}(g)) \in [0,1]^d$
+5.  **Fusion**: $h_\text{fusion} = w \odot \tilde{h}_a + (1-w) \odot \tilde{h}_t$
 
----
+**Outputs**:
+* `h_fusion`: Fused sequence $[B, L, d]$.
+* `beta`: Scalar mean of $w$ for analyzing modality dominance.
 
-## 2. beta_gate_tacfn.py — Vector-wise BetaGate
+### C. Decoder: `emotion_decoder.py`
+**Goal:** Extract emotion-specific evidence using learnable queries.
 
-**Goal:** Learn an adaptive, fine-grained fusion of the two modalities.
-
-Instead of a single scalar β per sample, we use a **per-dimension gating vector**
-to decide, for each latent feature dimension, how much to trust audio vs text.
-
-**Steps:**
-
-1. Apply LayerNorm to each modality sequence:
-   $$
-   \tilde{h}_a = LN(h_a),\quad \tilde{h}_t = LN(h_t)
-   $$
-
-2. Masked mean-pooling:
-   $$
-   a = \text{Pool}(\tilde{h}_a),\quad t = \text{Pool}(\tilde{h}_t)
-   $$
-
-3. Construct gate input:
-   $$
-   g = [a,\ t,\ |a-t|,\ a \odot t]
-   $$
-
-4. Predict vector gate:
-   $$
-   w = \sigma(\text{MLP}(g)) \in [0,1]^d
-   $$
-
-5. Broadcast and fuse:
-   - Expand `w` to `[B, L_f, d]`
-   - Fuse normalized sequences:
-     $$
-     h_\text{fusion} = w \odot \tilde{h}_a + (1-w) \odot \tilde{h}_t
-     $$
-
-6. For interpretability, we log:
-   $$
-   \beta_\text{mean} = \frac{1}{d}\sum_j w_j
-   $$
-   as a scalar indicator of modality preference.
-
-**Output:**
-
-- `h_fusion`: `[B, L_f, d]` fused sequence representation
-- `beta`: `[B, 1]` mean gate value for analysis/plots
-
-This design:
-- is **TACFN-inspired** (weight vector instead of scalar),
-- is robust against scale mismatch between pretrained encoders,
-- avoids trivial single-modality dominance.
+**Key Mechanism:**
+1.  **Learnable Queries**: Initialized with distinct vectors for each emotion (e.g., Happy, Sad).
+2.  **Cross-Attention**: Queries attend to the `h_fusion` memory to find supporting evidence.
+3.  **Explainability (Issue #2)**: Exports the attention weights to show *where* in the sequence the model found evidence for a specific emotion.
 
 ---
 
-## 3. fusion_classifier.py — End-to-End Fusion Model
+## 🧩 3. Variants & Baselines (Deprecated / Legacy / IEMOCAP)
+*These files demonstrate the framework's adaptability to different granularities and provide baselines for ablation studies.*
 
-Wraps everything into a classification-ready module.
+| File Name | Role | Description |
+| :--- | :--- | :--- |
+| `cross_modal_block.py` | Encoder | Standard Cross-Modal Attention (simplified for utterance-level). |
+| `beta_gate.py` | Fusion | Scalar-based Beta Gating (simpler version of vector-wise gating). |
+| `fusion_classifier.py` | **Baseline** | A standard MLP classifier (No Decoder). Used to demonstrate the improvement brought by the `EmotionDecoder`. |
 
-**Pipeline:**
+---
 
-1. Ensure inputs are `[B, L, d]` (utterance `[B, d]` → `[B, 1, d]`).
-2. Pass through `CrossModalTransformer`:
-   - get `h_a_tilde`, `h_t_tilde`.
-3. Apply `BetaGate`:
-   - get fused sequence `h_fusion` and `beta`.
-4. Mean-pool over time:
-   - `h_fusion_pooled ∈ [B, d]`.
-5. Classifier head:
-   - `LayerNorm → Linear → ReLU → Dropout → Linear`
-   - outputs logits `[B, num_classes]`.
+## 📐 Architecture Diagram
 
-**Signature:**
-
-```python
-logits, beta, h_fused = model(h_a, h_t, mask_a=None, mask_t=None)
+```
+      [ Audio & Text Inputs ]
+                 │
+                 ▼
+       [ Linear Projection ]
+                 │
+                 ▼
+    +-------------------------------------------------------+
+    |  WRAPPER: MoseiFusionWrapper                          |
+    |                                                       |
+    |  +--- BACKBONE: FusionWithEmotionDecoder -----------+ |
+    |  |                                                  | |
+    |  |   [ CrossModalBlock (Encoder) ]                  | |
+    |  |          │      │                                | |
+    |  |          │      +-----> [ Alignment Map ]        | |
+    |  |          ▼              (Explainability #1)      | |
+    |  |                                                  | |
+    |  |   [ BetaGate (Fusion) ]                          | |
+    |  |          │      │                                | |
+    |  |          │      +-----> [ Beta Values ]          | |
+    |  |          ▼              (Modality Weights)       | |
+    |  |                                                  | |
+    |  |   [ Fused Sequence ]                             | |
+    |  |          │                                       | |
+    |  |          ▼                                       | |
+    |  |   [ EmotionDecoder (Decoder) ]                   | |
+    |  |          │      │                                | |
+    |  |          │      +-----> [ Attribution Map ]      | |
+    |  |          ▼              (Explainability #2)      | |
+    |  +--------------------------------------------------+ |
+    |             │                                         |
+    +-------------------------------------------------------+
+                  │
+                  ▼
+   [ Logits (Emotion Predictions) ]
 ```
