@@ -26,15 +26,14 @@ Below is the **v2 Configuration (Best Generalization)**. This setup solves overf
 
 ```bash
 # 1. Setup path
-cd /content/HRI-EMO
-export PYTHONPATH=.
+%cd /content/HRI-EMO
 
 # 2. Run Training (v2 Config)
-python scripts/fusion/train_mosei_fusion_seq_level_decoder.py \
-  --index_csv data/mosei_index_splits.csv \
-  --audio_dir features/mosei/seq_level/audio \
-  --text_dir features/mosei/seq_level/text \
-  --out_dir /content/drive/MyDrive/.../mosei_fusion_decoder_v2 \
+!PYTHONPATH=. python -m scripts.fusion.train_mosei_fusion_seq_level_decoder \
+  --index_csv ../data/mosei_index_splits.csv \
+  --audio_dir ../features/mosei/seq_level/audio \
+  --text_dir ../features/mosei/seq_level/text \
+  --out_dir /content/drive/MyDrive/ColabNotebooks/beta_decoder_project/HRI-EMO-results/mosei_fusion_decoder_v2 \
   --epochs 20 \
   --batch_size 16 \
   --grad_accum 2 \
