@@ -1,10 +1,10 @@
-# HRI-EMO: Adaptive Unified Multimodal Emotion Recognition
+# HRI-EMO: Adaptive Unified Multimodal Emotion Recognition 
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
 
-**HRI-EMO** is a robust and interpretable framework for multimodal emotion recognition (Audio + Text). It combines an adaptive cross-modal fusion mechanism with a query-based emotion decoder to achieve state-of-the-art performance on the **CMU-MOSEI** dataset while providing deep explainability.
+**HRI-EMO** is a robust and interpretable framework for multimodal emotion recognition. It integrates an **adaptive cross-modal fusion mechanism** with an **emotion-level Transformer decoder**, designed to achieve both robust representation learning and fine-grained interpretability for Human–Robot Interaction (HRI) tasks.
 
 > **Key Feature:** Unlike black-box models, HRI-EMO tells you *why* it predicts an emotion by visualizing cross-modal alignment and emotion-specific attention.
 
@@ -43,6 +43,7 @@ graph TD
     Decoder --> Logits[Emotion Predictions]
 ```
 
+<!-- ## 🚀 Quick Start -->
 
 
 <!-- # An Adaptive Framework for Multimodal Emotion Understanding in Human–Robot Interaction
