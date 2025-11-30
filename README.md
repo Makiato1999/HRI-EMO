@@ -1,4 +1,51 @@
-# An Adaptive Framework for Multimodal Emotion Understanding in Human–Robot Interaction
+# HRI-EMO: Adaptive Unified Multimodal Emotion Recognition
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
+
+**HRI-EMO** is a robust and interpretable framework for multimodal emotion recognition (Audio + Text). It combines an adaptive cross-modal fusion mechanism with a query-based emotion decoder to achieve state-of-the-art performance on the **CMU-MOSEI** dataset while providing deep explainability.
+
+> **Key Feature:** Unlike black-box models, HRI-EMO tells you *why* it predicts an emotion by visualizing cross-modal alignment and emotion-specific attention.
+
+---
+
+## 🌟 Key Features
+
+* **Adaptive Fusion (β-Gating)**: A vector-wise gating mechanism that dynamically weights Audio vs. Text modalities based on signal reliability.
+* **Dual-Level Interpretability**:
+    1.  **Encoder Level**: Visualizes Audio-Text alignment (which audio frames align with which words).
+    2.  **Decoder Level**: Visualizes Emotion Attribution (which part of the sequence triggered a specific emotion like "Happy" or "Fear").
+* **Robustness**: Optimized "v2" architecture (Simplified Fusion + High Dropout) prevents overfitting on noisy datasets like MOSEI.
+* **Unified Framework**: Modular design supporting both Sequence-level and Utterance-level features.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    Input[Audio & Text Inputs] --> Proj[Linear Projection]
+    Proj --> Wrapper[MoseiFusionWrapper]
+
+    subgraph Backbone [FusionWithEmotionDecoder]
+        Wrapper --> Encoder[CrossModalBlock]
+        Encoder -->|Alignment Map| Exp1[Explainability #1]
+        
+        Encoder --> Gate[BetaGate]
+        Gate -->|Beta Values| Weights[Modality Weights]
+        
+        Gate --> Fused[Fused Sequence]
+        Fused --> Decoder[EmotionDecoder]
+        Decoder -->|Attribution Map| Exp2[Explainability #2]
+    end
+    
+    Decoder --> Logits[Emotion Predictions]
+```
+
+
+
+<!-- # An Adaptive Framework for Multimodal Emotion Understanding in Human–Robot Interaction
 We propose a multimodal emotion understanding framework based on an adaptive cross-modal fusion mechanism integrated with an emotion-level Transformer decoder.
 The framework is designed to achieve both robust multimodal representation learning and fine-grained emotion interpretability for Human–Robot Interaction (HRI) tasks.
 
@@ -87,4 +134,4 @@ In summary, the proposed framework combines adaptive β-gating fusion with an em
 
 - Interpretability at the emotion layer (through emotion query-based decoding)
 
-This dual-level adaptivity maintains computational efficiency while enhancing the model’s discriminative power and transparency in multi-label emotion recognition.
+This dual-level adaptivity maintains computational efficiency while enhancing the model’s discriminative power and transparency in multi-label emotion recognition. -->
