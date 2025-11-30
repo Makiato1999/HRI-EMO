@@ -2,19 +2,13 @@
 
 This script preprocesses the raw IEMOCAP dataset, aligns audio paths, text transcripts, and emotion labels, and generates the final CSV index files required for model training.
 
-## ⚙️ Requirements
-
-* Python 3.x
-* `pandas`
-* `tqdm` (for progress bars)
-
-## 🚀 Execution
+## 🚀 Quick Start
 
 1.  **Ensure Data Path:** Make sure the raw IEMOCAP full release data is accessible via the path defined in the script's `BASE` variable (`../data/IEMOCAP_full_release`).
 2.  **Run the script:**
 
     ```bash
-    python iemocap_data_processor.py
+    python build_iemocap_index_splits.py
     ```
 
 ## 📊 Output Files
