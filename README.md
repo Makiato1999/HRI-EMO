@@ -25,25 +25,6 @@
 <p align="center">
   <img src="https://github.com/Makiato1999/HRI-EMO/blob/main/tools/beta_decoder_architecture.png" alt="HRI-EMO Architecture" width="100%">
 </p>
-```mermaid
-graph TD
-    Input[Audio & Text Inputs] --> Proj[Linear Projection]
-    Proj --> Wrapper[MoseiFusionWrapper]
-
-    subgraph Backbone [FusionWithEmotionDecoder]
-        Wrapper --> Encoder[CrossModalBlock]
-        Encoder -->|Alignment Map| Exp1[Explainability #1]
-        
-        Encoder --> Gate[BetaGate]
-        Gate -->|Beta Values| Weights[Modality Weights]
-        
-        Gate --> Fused[Fused Sequence]
-        Fused --> Decoder[EmotionDecoder]
-        Decoder -->|Attribution Map| Exp2[Explainability #2]
-    end
-    
-    Decoder --> Logits[Emotion Predictions]
-```
 
 <!-- ## 🚀 Quick Start -->
 
