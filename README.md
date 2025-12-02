@@ -22,74 +22,27 @@
 ---
 
 ## 🏗️ Architecture
-
+<p align="center">
+  <img src="https://github.com/Makiato1999/HRI-EMO/blob/main/tools/beta_decoder_architecture.png" alt="HRI-EMO Architecture" width="100%">
+</p>
 ```mermaid
-graph LR
-    %% 定义样式
-    classDef input fill:#e1f5fe,stroke:#01579b,stroke-width:1px;
-    classDef process fill:#f3e5f5,stroke:#4a148c,stroke-width:1px;
-    classDef model fill:#fff3e0,stroke:#e65100,stroke-width:1px;
-    classDef fusion fill:#e8f5e9,stroke:#1b5e20,stroke-width:1px;
-    classDef output fill:#ffebee,stroke:#b71c1c,stroke-width:1px;
+graph TD
+    Input[Audio & Text Inputs] --> Proj[Linear Projection]
+    Proj --> Wrapper[MoseiFusionWrapper]
 
-    %% 1. Dataset
-    subgraph Dataset ["1. Dataset Inputs"]
-        direction TB
-        D1[("IEMOCAP\n(Audio/Text/Label)")]:::input
-        D2[("CMU-MOSEI\n(.csd Features)")]:::input
+    subgraph Backbone [FusionWithEmotionDecoder]
+        Wrapper --> Encoder[CrossModalBlock]
+        Encoder -->|Alignment Map| Exp1[Explainability #1]
+        
+        Encoder --> Gate[BetaGate]
+        Gate -->|Beta Values| Weights[Modality Weights]
+        
+        Gate --> Fused[Fused Sequence]
+        Fused --> Decoder[EmotionDecoder]
+        Decoder -->|Attribution Map| Exp2[Explainability #2]
     end
-
-    %% 2. Preprocessing
-    subgraph Prep ["2. Preprocessing"]
-        P1[Align & Extract Labels]:::process --> P2[Generate Index (.csv)]:::process
-    end
-
-    %% 3. Representations
-    subgraph Rep ["3. Feature Representation"]
-        direction TB
-        subgraph Trainable ["Trainable Encoders"]
-            E1[Text: BERT]:::model
-            E2[Audio: WavLM]:::model
-        end
-        subgraph Fixed ["Fixed Features"]
-            F1[Text: Glove/Vectors]:::model
-            F2[Audio: COVAREP]:::model
-        end
-        HT(h_t: Text Embeddings):::model
-        HA(h_a: Audio Embeddings):::model
-    end
-
-    %% 4. Fusion
-    subgraph Fusion ["4. Adaptive Fusion"]
-        CM[Cross-modal Blocks\n(Text<->Audio)]:::fusion
-        Gate((β Gate)):::fusion
-        HF[h_fused: Multimodal Sequence]:::fusion
-    end
-
-    %% 5. Decoder
-    subgraph Decoder ["5. Emotion Decoder"]
-        Q[Emotion Queries\n(Learnable Vectors)]:::model
-        Attn[Multi-head\nCross-Attention]:::model
-        Lin[Linear Projection]:::model
-    end
-
-    %% 6. Prediction
-    subgraph Pred ["6. Prediction"]
-        Out1[IEMOCAP Logits\n(Softmax)]:::output
-        Out2[MOSEI Logits\n(Sigmoid)]:::output
-    end
-
-    %% 连接关系
-    D1 & D2 --> P1
-    P2 --> E1 & E2 & F1 & F2
-    E1 & F1 --> HT
-    E2 & F2 --> HA
-    HT & HA --> CM --> Gate --> HF
     
-    Q --> Attn
-    HF --> Attn
-    Attn --> Lin
-    Lin --> Out1 & Out2
+    Decoder --> Logits[Emotion Predictions]
 ```
 
 <!-- ## 🚀 Quick Start -->
